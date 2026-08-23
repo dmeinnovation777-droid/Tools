@@ -76,7 +76,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#SourceDir}\{#LauncherExe}";  DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\{#AutoTunerExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\{#MhdLockExe}";   DestDir: "{app}"; Flags: ignoreversion
-Source: "..\README.md";                 DestDir: "{app}"; DestName: "README.md"; Flags: ignoreversion isreadme
+Source: "..\README.md";                 DestDir: "{app}"; DestName: "README.md"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}";      Filename: "{app}\{#LauncherExe}"
