@@ -3,8 +3,13 @@ name: Tests & Windows build
 on:
   push:
     branches: ["**"]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
+
+# Needed so a tagged build can publish the installer as a release asset.
+permissions:
+  contents: write
 
 jobs:
   test:
@@ -84,3 +89,23 @@ jobs:
             dist/AutoTuner Backup Tool.exe
             dist/MHD Lock Tool.exe
           if-no-files-found: error
+
+      # A tag turns the build into a public download that never expires.
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          SETUP="dist/DME-Innovation-Tools-Setup-${VERSION}.exe"
+          test -f "$SETUP"
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "$SETUP" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "$SETUP" \
+              --title "DME Innovation Tools ${VERSION}" \
+              --notes-file installer/RELEASE_NOTES.md
+          fi
+          echo "Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"

@@ -7,6 +7,10 @@
 
 <p align="center">Zwei Windows-Werkzeuge für die Arbeit am Steuergerät — in einer Installation.</p>
 
+<p align="center">
+  <a href="https://github.com/dmeinnovation777-droid/Tools/releases/latest"><b>⬇ Setup herunterladen</b></a>
+</p>
+
 ![DME Innovation Tools](docs/screenshot-suite-launcher.png)
 
 | Tool | Zweck |
@@ -34,11 +38,16 @@ Oberfläche) — keine Fremdpakete zur Laufzeit.
 
 ## Installation
 
-**Eine Datei, ein Doppelklick:**
+**Eine Datei, ein Doppelklick.** Das Setup liegt unter
+[Releases](https://github.com/dmeinnovation777-droid/Tools/releases/latest)
+unter *Assets*:
 
 ```
 DME-Innovation-Tools-Setup-1.0.0.exe
 ```
+
+Windows zeigt bei unsignierten Setups „Der Computer wurde durch Windows
+geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
 
 Das Setup installiert beide Werkzeuge samt Starter, legt Startmenü- und
 (optional) Desktop-Verknüpfungen an und bringt einen Uninstaller mit.
@@ -54,9 +63,9 @@ AutoTuner Backup Tool.exe
 MHD Lock Tool.exe
 ```
 
-Die Setup-Datei entsteht mit `build_installer.bat` (siehe
-[Selbst bauen](#selbst-bauen)) oder automatisch im GitHub-Actions-Lauf, der sie
-als Artefakt `DME-Innovation-Tools-Setup-<version>` anhängt.
+Jeder Git-Tag `v*` baut das Setup automatisch und veröffentlicht es als Release.
+Ohne Tag hängt der Actions-Lauf es als Artefakt an. Lokal geht es mit
+`build_installer.bat` (siehe [Selbst bauen](#selbst-bauen)).
 
 **Ohne Installation, direkt aus den Quellen:**
 
