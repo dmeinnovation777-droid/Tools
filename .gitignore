@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# PyInstaller build output
+build/
+dist/
+*.spec
+
+# Local scratch / staging
+staging/
+out/
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Never commit licensed vendor files or customer data
+*.toolkey
+*_vin.txt
+*.mhd
+TuningMapBuilder*.exe
