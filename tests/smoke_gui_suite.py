@@ -4,11 +4,12 @@ Headless GUI smoke test for the DME Innovation Tools launcher.
     xvfb-run -a -s "-screen 0 880x560x24" python tests/smoke_gui_suite.py
 """
 import os
-import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+
+from _screenshot import shoot  # noqa: E402
 
 import dme_suite as suite  # noqa: E402
 
@@ -28,6 +29,6 @@ for tool in suite.TOOLS:
     assert tool["name"] in app.banner._text.cget("text")
     print(f"{tool['name']}: OK")
 
-subprocess.run(["xwd", "-root", "-silent", "-out", "/tmp/shot_suite.xwd"], check=True)
+shoot("suite")
 app.destroy()
 print("SMOKE TEST PASSED")

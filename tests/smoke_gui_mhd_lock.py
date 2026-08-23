@@ -21,6 +21,8 @@ sys.path.insert(0, ROOT)
 WORK = tempfile.mkdtemp(prefix="mhd_smoke_")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(WORK, "config")
 
+from _screenshot import shoot  # noqa: E402
+
 import mhd_lock_tool as m  # noqa: E402
 
 assert m.TK_AVAILABLE, "tkinter missing"
@@ -102,11 +104,6 @@ def wait_for_worker(app, timeout=60):
     return False
 
 
-def shoot(name):
-    import subprocess
-    subprocess.run(["xwd", "-root", "-silent", "-out", f"/tmp/shot_mhd_{name}.xwd"], check=True)
-
-
 stub = build_fixture()
 app = m.MhdLockTool()
 app.geometry("1040x820")
@@ -125,7 +122,7 @@ app.update()
 assert app.config_data["builder_exe"] == stub
 assert os.path.isfile(m.config_path()), "settings were not persisted"
 print("settings OK ->", m.config_path())
-shoot("settings")
+shoot("mhd_settings")
 
 # ── Lock tab: pre-flight ────────────────────────────────────────────────────
 app.tabs.select("lock")
@@ -168,7 +165,7 @@ assert "Total bytes changed: 4" in run_log
 job_log = open(os.path.join(WORK, "locked", "MAP1 E45 MAP2 E30 v2.log"), encoding="utf-8").read()
 assert "DMETEST0000000001" in job_log and "Map correctly written" in job_log
 print("lock run OK ->", produced)
-shoot("lock")
+shoot("mhd_lock")
 
 # staging must be cleaned up
 leftovers = [p for p in os.listdir(tempfile.gettempdir()) if p.startswith("dme_mhd_")]
@@ -212,7 +209,7 @@ final = sorted(os.listdir(os.path.join(WORK, "locked")))
 for expected in ("MAP1 E45 MAP2 E30 v3.mhd", "MAP1 E45 MAP2 E30 v4.mhd"):
     assert expected in final, final
 print("batch OK:", statuses, "->", app.var_batch_summary.get())
-shoot("batch")
+shoot("mhd_batch")
 
 # error path: no builder configured
 app.var_exe.set("")

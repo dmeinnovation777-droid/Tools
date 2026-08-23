@@ -8,8 +8,10 @@ Needs a display and tkinter; not collected by `unittest discover` on purpose.
 Writes /tmp/shot_tab1.xwd and /tmp/shot_tab2.xwd; convert them with
     python3 tools/xwd2png.py /tmp/shot_tab1.xwd docs/screenshot-....png
 """
-import os, subprocess, sys, tempfile, zipfile
+import os, sys, tempfile, zipfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _screenshot import shoot  # noqa: E402
+
 import autotuner_tool as at
 
 assert at.TK_AVAILABLE, "tkinter missing"
@@ -46,7 +48,7 @@ with open(out_bin, "rb") as f:
     assert f.read() == b"\x01"*4096 + b"\x02"*4096 + b"\x03"*512 + b"\x04"*512
 assert app._z2b_banner._visible and "Combined 4 part(s)" in app._z2b_banner._text.cget("text")
 print("ZIP->BIN OK:", app._z2b_banner._text.cget("text").splitlines()[0])
-subprocess.run(["xwd", "-root", "-silent", "-out", "/tmp/shot_tab1.xwd"], check=True)
+shoot("tab1")
 
 # ── Page 2 ──────────────────────────────────────────────────────────────────
 app.tabs.select("b2z")
@@ -86,7 +88,7 @@ with zipfile.ZipFile(out_zip) as zf:
     assert meta["VehicleProducer"] == "Lamborghini" and meta["EcuBuild"] == "MED17.1.1"
     assert meta["VehicleVIN"] == "ZHWUC1ZF9ELA02345"
 print("BIN->ZIP OK:", app._b2z_banner._text.cget("text").splitlines()[0])
-subprocess.run(["xwd", "-root", "-silent", "-out", "/tmp/shot_tab2.xwd"], check=True)
+shoot("tab2")
 
 # error path -> banner, no crash
 app._b2z_bin_var.set("")
