@@ -96,6 +96,9 @@ VIN_RE = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
 ROM_ID_RE = re.compile(rb"(?<![0-9A-Za-z])[0-9A-F]{14}(?![0-9A-Za-z])")
 SGBM_RE = re.compile(rb"(?:swfl|btld|swfk)[_-][0-9a-fA-F]{8}")
 _UNSAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+# BMW program id as it appears in file names: 14 hex digits, e.g. 00005C6414C808
+FILE_ID_RE = re.compile(r"(?<![0-9A-Za-z])([0-9A-Fa-f]{14})(?![0-9A-Za-z])")
+STOCK_PATTERNS = ("_original.bin", "_orig.bin", "_stock.bin", ".org")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -216,6 +219,185 @@ def detect_rom_ids(data: bytes, limit: int = 12) -> list[str]:
         if len(found) >= limit * 2:
             break
     return found
+
+
+def ids_in_name(path: str) -> list[str]:
+    """Program ids embedded in a file name, upper case."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    return [match.group(1).upper() for match in FILE_ID_RE.finditer(stem)]
+
+
+def id_in_image(data: bytes, identifier: str) -> bool:
+    """
+    True when the program id is present in the ROM.
+
+    BMW stores it as seven packed bytes (00005C6414C808 -> 00 00 5C 64 14 C8 08),
+    not as text, so a plain string search finds nothing.
+    """
+    try:
+        packed = bytes.fromhex(identifier)
+    except ValueError:
+        return False
+    if len(packed) != 7:
+        return False
+    return packed in data or identifier.encode() in data or identifier.lower().encode() in data
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Companion lookup - the app finds stock ROM, XDF and key by itself
+# ─────────────────────────────────────────────────────────────────────────────
+@dataclass
+class Resolution:
+    """What the app worked out on its own from a single tuned file."""
+    tuned: str = ""
+    stock: str = ""
+    xdf: str = ""
+    toolkey: str = ""
+    vin: str = ""
+    rom_id: str = ""
+    sources: dict = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+
+    def source(self, key: str) -> str:
+        return self.sources.get(key, "")
+
+    @property
+    def complete(self) -> bool:
+        return bool(self.stock and self.xdf and self.toolkey)
+
+
+def _scan_dirs(tuned_path: str, library_dir: str = "", max_depth: int = 3) -> list[str]:
+    """The tuned file's own folder first, then the library, breadth limited."""
+    folders: list[str] = []
+    own = os.path.dirname(os.path.abspath(tuned_path))
+    if os.path.isdir(own):
+        folders.append(own)
+    if library_dir and os.path.isdir(library_dir):
+        root = os.path.abspath(library_dir)
+        base_depth = root.rstrip(os.sep).count(os.sep)
+        for current, subdirs, _files in os.walk(root):
+            if current.rstrip(os.sep).count(os.sep) - base_depth >= max_depth:
+                subdirs[:] = []
+            subdirs[:] = [d for d in subdirs if not d.startswith(".")]
+            if current not in folders:
+                folders.append(current)
+    return folders
+
+
+def _files_in(folders, predicate) -> list[str]:
+    found = []
+    for folder in folders:
+        try:
+            entries = sorted(os.listdir(folder))
+        except OSError:
+            continue
+        for name in entries:
+            path = os.path.join(folder, name)
+            if os.path.isfile(path) and predicate(name):
+                found.append(path)
+    return found
+
+
+def _is_stock_name(name: str) -> bool:
+    lower = name.lower()
+    return any(lower.endswith(pattern) for pattern in STOCK_PATTERNS)
+
+
+def resolve_inputs(tuned_path: str, library_dir: str = "", toolkey: str = "",
+                   max_depth: int = 3) -> Resolution:
+    """
+    Work out stock ROM, XDF, tool key and VIN from the tuned file alone.
+
+    Candidates are not guessed: a companion whose file name carries a program id
+    is only accepted when that id is really present inside the tuned image. Only
+    if nothing matches by id does the lookup fall back to "the single obvious
+    file in the same folder".
+    """
+    result = Resolution(tuned=tuned_path)
+    if not tuned_path or not os.path.isfile(tuned_path):
+        result.notes.append("Select a tuned .bin first.")
+        return result
+
+    data = read_bytes(tuned_path)
+    own_folder = os.path.dirname(os.path.abspath(tuned_path))
+    folders = _scan_dirs(tuned_path, library_dir, max_depth)
+
+    def by_id(paths):
+        """(path, id) for candidates whose name id occurs in the tuned image."""
+        for path in paths:
+            for identifier in ids_in_name(path):
+                if id_in_image(data, identifier):
+                    return path, identifier
+        return None, ""
+
+    # ── stock ROM ───────────────────────────────────────────────────────────
+    stock_candidates = [p for p in _files_in(folders, _is_stock_name)
+                        if os.path.abspath(p) != os.path.abspath(tuned_path)]
+    stock, rom_id = by_id(stock_candidates)
+    if stock:
+        result.sources["stock"] = "matched by ROM id"
+    else:
+        same_size = [p for p in stock_candidates
+                     if os.path.dirname(p) == own_folder
+                     and os.path.getsize(p) == len(data)]
+        if len(same_size) == 1:
+            stock = same_size[0]
+            result.sources["stock"] = "only stock ROM in the folder"
+        elif len(same_size) > 1:
+            result.notes.append(f"{len(same_size)} possible stock ROMs in the folder - "
+                                f"pick one under Details.")
+    if stock:
+        result.stock = stock
+        if not rom_id:
+            ids = ids_in_name(stock)
+            rom_id = ids[0] if ids else ""
+
+    # ── XDF ─────────────────────────────────────────────────────────────────
+    xdf_candidates = _files_in(folders, lambda n: n.lower().endswith(XDF_EXT))
+    xdf, xdf_id = by_id(xdf_candidates)
+    if xdf:
+        result.sources["xdf"] = "matched by ROM id"
+        rom_id = rom_id or xdf_id
+    else:
+        local = [p for p in xdf_candidates if os.path.dirname(p) == own_folder]
+        if len(local) == 1:
+            xdf = local[0]
+            result.sources["xdf"] = "only XDF in the folder"
+        elif len(local) > 1:
+            result.notes.append(f"{len(local)} XDFs in the folder - pick one under Details.")
+        elif rom_id:
+            named = [p for p in xdf_candidates if rom_id in [i.upper() for i in ids_in_name(p)]]
+            if len(named) == 1:
+                xdf = named[0]
+                result.sources["xdf"] = "matched by ROM id"
+    result.xdf = xdf or ""
+    result.rom_id = rom_id
+
+    # ── tool key ────────────────────────────────────────────────────────────
+    if toolkey and os.path.isfile(toolkey):
+        result.toolkey = toolkey
+        result.sources["toolkey"] = "from settings"
+    else:
+        keys = _files_in(folders, lambda n: n.lower().endswith(TOOLKEY_EXT))
+        if len(keys) == 1:
+            result.toolkey = keys[0]
+            result.sources["toolkey"] = "found next to the files"
+        elif len(keys) > 1:
+            local = [p for p in keys if os.path.dirname(p) == own_folder]
+            if len(local) == 1:
+                result.toolkey = local[0]
+                result.sources["toolkey"] = "found next to the files"
+
+    # ── VIN, if the folder was used before ──────────────────────────────────
+    for path in _files_in([own_folder], lambda n: n.lower().endswith(VIN_SUFFIX)):
+        candidate = os.path.basename(path)[: -len(VIN_SUFFIX)]
+        ok, vin, _ = validate_vin(candidate)
+        if ok:
+            result.vin = vin
+            result.sources["vin"] = "from the folder"
+            break
+
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -798,9 +980,8 @@ DEFAULT_CONFIG = {
     "keep_staging": False,
     "open_after_success": True,
     "timeout": 600,
-    "last_stock": "",
-    "last_xdf": "",
-    "last_toolkey": "",
+    "toolkey": "",
+    "library_dir": "",
     "last_customer": "",
 }
 
@@ -931,6 +1112,7 @@ class MhdLockTool(_TkBase):
         self._running = False
         self._stop_event = threading.Event()
         self._preflight_after = None
+        self._manual: set[str] = set()
         self._xdf_cache: tuple[str, float, XdfDefinition] | None = None
 
         self._build()
@@ -963,102 +1145,273 @@ class MhdLockTool(_TkBase):
     def _build_lock_page(self):
         page = ui.Page(self._host)
         self.lock_page = page
-        page.intro("Prepares a clean working directory for the MHD map builder, checks every "
-                   "input before the run, drives the builder and files the locked .mhd away. "
-                   "The locking itself is done by your licensed MHD tool.")
+        page.intro("Pick the customer's tuned file — stock ROM, XDF and tool key are "
+                   "found automatically. Check the VIN, press Lock. That is all.")
 
-        who = page.card("Customer & vehicle")
-        row = tk.Frame(who.body, bg=ui.CARD)
-        row.pack(fill=tk.X)
-        self.var_customer = tk.StringVar()
-        customer = ui.LabeledEntry(row, "Customer / job name", self.var_customer,
-                                   mono=False, placeholder="Used for the output file name")
-        customer.grid(row=0, column=0, sticky="ew", padx=(0, 14))
-        self.var_vin = tk.StringVar()
-        vin_cell = ui.LabeledEntry(row, "Customer VIN (17 characters)", self.var_vin,
-                                   placeholder="The lock is bound to this VIN")
-        vin_cell.grid(row=0, column=1, sticky="ew")
-        row.grid_columnconfigure(0, weight=1, uniform="who")
-        row.grid_columnconfigure(1, weight=1, uniform="who")
-        self.lbl_vin = tk.Label(who.body, text="", bg=ui.CARD, fg=ui.TEXT_FAINT,
-                                font=ui.f("small"), anchor="w")
-        self.lbl_vin.pack(fill=tk.X, pady=(6, 0))
+        # Shown only while something global is still missing.
+        self.setup_card = ui.Card(page.body, title="One-time setup")
+        self.setup_msg = tk.Label(self.setup_card.body, text="", bg=ui.CARD, fg=ui.TEXT_DIM,
+                                  font=ui.f("small"), anchor="w", justify="left",
+                                  wraplength=800)
+        self.setup_msg.pack(fill=tk.X)
+        ui.button(self.setup_card.body, "Open settings", lambda: self.tabs.select("settings"),
+                  variant="secondary", size="sm").pack(anchor="e", pady=(10, 0))
 
-        files = page.card("Files")
-        self.var_stock = tk.StringVar()
-        self.row_stock = ui.PathRow(files.body, "Stock / original ROM (.bin)", self.var_stock,
-                                    lambda: self._pick_file(self.var_stock, "Select the stock ROM",
-                                                            [("ROM image", "*.bin *.org"),
-                                                             ("All files", "*.*")]),
-                                    tooltip="Staged as <name>_original.bin")
-        self.row_stock.pack(fill=tk.X, pady=(0, 12))
+        # ── 1 · the only file you have to pick ──────────────────────────────
+        step1 = page.card("Tuned file")
+        self._step1 = step1
         self.var_tuned = tk.StringVar()
-        self.row_tuned = ui.PathRow(files.body, "Tuned ROM (.bin)", self.var_tuned,
-                                    lambda: self._pick_file(self.var_tuned, "Select the tuned ROM",
-                                                            [("ROM image", "*.bin"),
-                                                             ("All files", "*.*")]),
-                                    tooltip="The customer file that gets locked")
-        self.row_tuned.pack(fill=tk.X, pady=(0, 12))
+        self.row_tuned = ui.PathRow(step1.body, "Customer's tuned ROM (.bin)",
+                                    self.var_tuned, self._pick_tuned,
+                                    browse_text="Choose…",
+                                    hint="Everything else is derived from this file")
+        self.row_tuned.pack(fill=tk.X)
+
+        ui.hr(step1.body, bg=ui.BORDER, pady=(14, 10))
+        self.res_rows = {}
+        for key, label in (("stock", "Stock ROM"), ("xdf", "XDF"), ("toolkey", "Tool key")):
+            row = ui.ResolvedRow(step1.body, label)
+            row.pack(fill=tk.X, pady=1)
+            self.res_rows[key] = row
+
+        self.manual = ui.Collapsible(step1.body, "Change manually", bg=ui.CARD)
+        self.manual.pack(fill=tk.X, pady=(10, 0))
+        self.var_stock = tk.StringVar()
         self.var_xdf = tk.StringVar()
-        self.row_xdf = ui.PathRow(files.body, "XDF definition (.xdf)", self.var_xdf,
-                                  lambda: self._pick_file(self.var_xdf, "Select the XDF",
-                                                          [("TunerPro XDF", "*.xdf"),
-                                                           ("All files", "*.*")]),
-                                  tooltip="Must contain the current MHD+ tables")
-        self.row_xdf.pack(fill=tk.X, pady=(0, 12))
         self.var_toolkey = tk.StringVar()
-        self.row_toolkey = ui.PathRow(files.body, "MHD tool key (.toolkey)", self.var_toolkey,
-                                      lambda: self._pick_file(self.var_toolkey, "Select your .toolkey",
-                                                              [("MHD tool key", "*.toolkey"),
-                                                               ("All files", "*.*")]),
-                                      tooltip="Your personal MHD key — never leaves this machine")
-        self.row_toolkey.pack(fill=tk.X)
+        for var, label, types, key in (
+                (self.var_stock, "Stock / original ROM (.bin)",
+                 [("ROM image", "*.bin *.org"), ("All files", "*.*")], "stock"),
+                (self.var_xdf, "XDF definition (.xdf)",
+                 [("TunerPro XDF", "*.xdf"), ("All files", "*.*")], "xdf"),
+                (self.var_toolkey, "MHD tool key (.toolkey)",
+                 [("MHD tool key", "*.toolkey"), ("All files", "*.*")], "toolkey")):
+            ui.PathRow(self.manual.body, label, var,
+                       lambda v=var, l=label, t=types, k=key: self._pick_override(v, l, t, k)
+                       ).pack(fill=tk.X, pady=(8, 0))
 
-        out = page.card("Output")
-        self.var_outdir = tk.StringVar()
-        self.row_outdir = ui.PathRow(out.body, "Folder for the locked .mhd", self.var_outdir,
-                                     lambda: self._pick_dir(self.var_outdir,
-                                                            "Select the output folder"),
-                                     browse_text="Choose…")
-        self.row_outdir.pack(fill=tk.X)
+        # ── 2 · the only thing you have to type ─────────────────────────────
+        step2 = page.card("Customer")
+        grid = tk.Frame(step2.body, bg=ui.CARD)
+        grid.pack(fill=tk.X)
+        self.var_vin = tk.StringVar()
+        ui.LabeledEntry(grid, "VIN (17 characters)", self.var_vin).grid(
+            row=0, column=0, sticky="ew", padx=(0, 14))
+        self.var_customer = tk.StringVar()
+        ui.LabeledEntry(grid, "Name (optional, used for the file name)",
+                        self.var_customer, mono=False).grid(row=0, column=1, sticky="ew")
+        grid.grid_columnconfigure(0, weight=1, uniform="c")
+        grid.grid_columnconfigure(1, weight=1, uniform="c")
+        self.lbl_vin = tk.Label(step2.body, text="", bg=ui.CARD, fg=ui.TEXT_FAINT,
+                                font=ui.f("small"), anchor="w")
+        self.lbl_vin.pack(fill=tk.X, pady=(8, 0))
 
-        log_card = page.card("Checks & builder log", hint="")
-        self.log_card = log_card
-        self.log = ui.LogView(log_card.body, height=14)
+        # ── everything else is out of the way ───────────────────────────────
+        self.details = ui.Collapsible(page.body, "Details and builder log", bg=ui.BG)
+        self.details.pack(fill=tk.X, pady=(0, 14))
+        detail_card = ui.Card(self.details.body, title=None)
+        detail_card.pack(fill=tk.BOTH, expand=True)
+        self.log = ui.LogView(detail_card.body, height=14)
         self.log.pack(fill=tk.BOTH, expand=True)
-        tools = tk.Frame(log_card.body, bg=ui.CARD)
+        tools = tk.Frame(detail_card.body, bg=ui.CARD)
         tools.pack(fill=tk.X, pady=(10, 0))
-        tk.Label(tools, text="Checks run automatically whenever an input changes.",
-                 bg=ui.CARD, fg=ui.TEXT_FAINT, font=ui.f("small")).pack(side=tk.LEFT)
+        self.btn_stage = ui.button(tools, "Prepare folder only", self._on_stage_only,
+                                   variant="secondary", size="sm")
+        self.btn_stage.pack(side=tk.LEFT)
         ui.button(tools, "Clear", self.log.clear, variant="ghost", size="sm",
                   bg=ui.CARD).pack(side=tk.RIGHT)
-        ui.button(tools, "Re-check  ⟳", lambda: self._run_preflight(force=True),
-                  variant="secondary", size="sm").pack(side=tk.RIGHT, padx=(0, 8))
-        self.log.set_text("Select the files above — the pre-flight checks start on their own.",
-                          "dim")
+        ui.button(tools, "Re-check  ⟳", lambda: self._resolve_and_check(force=True),
+                  variant="ghost", size="sm", bg=ui.CARD).pack(side=tk.RIGHT, padx=(0, 8))
+        self.log.set_text("Pick a tuned file — the checks start on their own.", "dim")
 
-        self.var_summary = tk.StringVar(value="Waiting for input")
+        self.var_summary = tk.StringVar(value="Waiting for a tuned file")
         page.summary(self.var_summary)
         self.btn_lock = ui.button(page.action_row, "Lock now  🔒", self._on_lock,
                                   variant="primary", size="lg")
         self.btn_lock.pack(side=tk.RIGHT)
-        self.btn_stage = ui.button(page.action_row, "Prepare folder only", self._on_stage_only,
-                                   variant="secondary", size="lg")
-        self.btn_stage.pack(side=tk.RIGHT, padx=(0, 10))
 
-        for var in (self.var_customer, self.var_vin, self.var_stock, self.var_tuned,
-                    self.var_xdf, self.var_toolkey, self.var_outdir):
-            var.trace_add("write", lambda *_: self._schedule_preflight())
+        self.var_tuned.trace_add("write", lambda *_: self._on_tuned_changed())
+        self.var_vin.trace_add("write", lambda *_: self._on_vin_typed())
+        self.var_customer.trace_add("write", lambda *_: self._schedule_preflight())
         return page
+
+    def _on_vin_typed(self):
+        """A VIN is upper case and has no spaces - the file name must match exactly."""
+        raw = self.var_vin.get()
+        clean = normalise_vin(raw)
+        if clean != raw:
+            self.var_vin.set(clean)   # re-enters once, then raw == clean
+            return
+        self._schedule_preflight()
+
+    # ── automatic resolution ─────────────────────────────────────────────────
+
+    def _pick_tuned(self):
+        path = filedialog.askopenfilename(
+            title="Select the tuned ROM",
+            filetypes=[("ROM image", "*.bin"), ("All files", "*.*")],
+            initialdir=os.path.dirname(self.var_tuned.get()) or None)
+        if path:
+            self.var_tuned.set(path)
+
+    def _pick_override(self, variable, title, filetypes, key):
+        path = filedialog.askopenfilename(title=title, filetypes=filetypes,
+                                          initialdir=os.path.dirname(variable.get()) or None)
+        if path:
+            self._manual.add(key)
+            variable.set(path)
+            self._schedule_preflight()
+
+    def _on_tuned_changed(self):
+        self._manual.clear()          # a new car starts from scratch
+        self._schedule_preflight()
+
+    def _resolve_and_check(self, force=False):
+        """Derive every companion file from the tuned ROM, then run the checks."""
+        self._cancel_preflight()
+        if self._running:
+            return
+        self._update_setup_hint()
+
+        tuned = self.var_tuned.get().strip()
+        if not tuned or not os.path.isfile(tuned):
+            for row in self.res_rows.values():
+                row.set("", "", ok=False)
+            self.row_tuned.set_hint("Everything else is derived from this file")
+            self.var_summary.set("Waiting for a tuned file")
+            if force:
+                self.log.set_text("Pick a tuned file first.", "warn")
+            return
+
+        size = os.path.getsize(tuned)
+        self.row_tuned.set_hint(f"{os.path.basename(tuned)} · {human_size(size)}", "ok")
+
+        try:
+            found = resolve_inputs(tuned, self.config_data.get("library_dir", ""),
+                                   self.config_data.get("toolkey", ""))
+        except OSError as exc:
+            self.log.set_text(f"Could not read the file: {exc}", "error")
+            return
+
+        for key in ("stock", "xdf", "toolkey"):
+            if key not in self._manual:
+                getattr(self, f"var_{key}").set(getattr(found, key))
+        if found.vin and not self.var_vin.get().strip():
+            self.var_vin.set(found.vin)
+        if found.rom_id:
+            self._step1.set_hint(f"ROM {found.rom_id}", "ok")
+
+        for key, label in (("stock", "Stock ROM"), ("xdf", "XDF"), ("toolkey", "Tool key")):
+            path = getattr(self, f"var_{key}").get().strip()
+            source = "chosen manually" if key in self._manual else found.source(key)
+            self.res_rows[key].set(os.path.basename(path) if path else "", source,
+                                   ok=bool(path) and os.path.isfile(path))
+
+        missing = [k for k in ("stock", "xdf", "toolkey")
+                   if not getattr(self, f"var_{key}" if False else f"var_{k}").get().strip()]
+        if missing or found.notes:
+            self.manual.expand()
+        for note in found.notes:
+            self.log.write(f" ! {note}", "warn")
+
+        self._run_preflight()
+
+    def _update_setup_hint(self):
+        """The setup card only exists while something global is still missing."""
+        problems = []
+        exe = self.config_data.get("builder_exe", "")
+        if not exe or not os.path.isfile(exe):
+            problems.append("the path to your MHD map builder (TuningMapBuilder / "
+                            "MHD Map Encryption)")
+        key = self.config_data.get("toolkey", "")
+        if (not key or not os.path.isfile(key)) and not self.var_toolkey.get().strip():
+            problems.append("your .toolkey")
+        if problems:
+            self.setup_msg.config(text="Still missing: " + " and ".join(problems) +
+                                       ". Set it once under Settings — after that every "
+                                       "job needs nothing but the tuned file and the VIN.")
+            if not self.setup_card.winfo_ismapped():
+                self.setup_card.pack(fill=tk.X, pady=(0, 14), before=self._step1)
+        elif self.setup_card.winfo_ismapped():
+            self.setup_card.pack_forget()
+
+    # ── Pre-flight ───────────────────────────────────────────────────────────
+
+    def _cancel_preflight(self):
+        if self._preflight_after:
+            self.after_cancel(self._preflight_after)
+            self._preflight_after = None
+
+    def _schedule_preflight(self):
+        self._save_settings()
+        self._cancel_preflight()
+        if self._running:
+            return
+        self._preflight_after = self.after(350, self._resolve_and_check)
+
+    def _run_preflight(self):
+        job = self._current_job()
+        ok_vin, vin, vin_msg = validate_vin(job.vin)
+        self.lbl_vin.config(text=("✓  " if ok_vin else "✕  ") + vin_msg,
+                            fg=ui.OK if ok_vin else (ui.TEXT_FAINT if not job.vin else ui.ERR))
+        if not (job.stock_bin and job.tuned_bin and os.path.isfile(job.stock_bin)
+                and os.path.isfile(job.tuned_bin)):
+            self.var_summary.set("Stock ROM not found — pick it under Details")
+            return None
+        report = preflight(job, self._definition(job.xdf))
+        self._render_preflight(report, job)
+        return report
+
+    def _render_preflight(self, report: Preflight, job: LockJob):
+        self.log.clear()
+        self.log.write("PRE-FLIGHT CHECKS", "dim")
+        self.log.write("─" * 62, "dim")
+        for issue in report.issues:
+            tag = {"error": "error", "warn": "warn"}.get(issue.level, "info")
+            mark = {"error": "✕", "warn": "!", "info": "·"}[issue.level]
+            self.log.write(f" {mark} {issue.text}", tag)
+        if report.regions:
+            definition = self._definition(job.xdf)
+            self.log.write("")
+            self.log.write(f"MODIFIED REGIONS ({len(report.regions)})", "dim")
+            self.log.write("─" * 62, "dim")
+            for start, length in report.regions[:25]:
+                names = definition.tables_at(start, length, report.file_size) if definition else []
+                label = ", ".join(names[:2]) if names else "— not in this XDF —"
+                self.log.write(f"  0x{start:07X}  {length:>6,} B   {label[:64]}",
+                               "accent" if names else "warn")
+            if len(report.regions) > 25:
+                self.log.write(f"  … and {len(report.regions) - 25} more region(s)", "dim")
+        if report.touched_tables:
+            self.log.write("")
+            self.log.write(f"TABLES TOUCHED ({len(report.touched_tables)})", "dim")
+            self.log.write("─" * 62, "dim")
+            for name in report.touched_tables[:20]:
+                self.log.write(f"  · {name[:70]}")
+            if len(report.touched_tables) > 20:
+                self.log.write(f"  … and {len(report.touched_tables) - 20} more", "dim")
+        self.log.scroll_top()
+
+        if report.ok:
+            self.details.set_title("Details and builder log")
+            self.var_summary.set(f"{report.changed_bytes:,} byte(s) changed · "
+                                 f"{len(report.touched_tables)} table(s) · ready")
+            self.status.set("Ready to lock", "ok")
+        else:
+            self.details.set_title(f"Details and builder log — {len(report.errors)} problem(s)")
+            self.details.expand()
+            self.var_summary.set(report.errors[0].text if report.errors else "Checks failed")
+            self.status.set("Check failed", "error")
+        return report
 
     # ── Batch page ───────────────────────────────────────────────────────────
 
     def _build_batch_page(self):
         page = ui.Page(self._host)
         self.batch_page = page
-        page.intro("Lock a whole queue in one go. Every job is staged and run in its own clean "
-                   "folder, so one bad file can never affect another customer. Stock ROM, XDF "
-                   "and tool key come from the Lock tab unless a CSV row overrides them.")
+        page.intro("Lock a whole queue in one go. Stock ROM and XDF are resolved per file, "
+                   "so tunes from different cars can sit in the same queue. Every job runs in "
+                   "its own clean folder — one bad file can never affect another customer.")
 
         queue_card = page.card("Job queue", hint="0 jobs")
         self.batch_card = queue_card
@@ -1154,6 +1507,25 @@ class MhdLockTool(_TkBase):
                        self.var_pass_workdir,
                        "Only needed if your build of the tool expects a path argument.")
 
+        yours = page.card("Your files", hint="set once, used for every job")
+        self.var_cfg_toolkey = tk.StringVar()
+        ui.PathRow(yours.body, "MHD tool key (.toolkey)", self.var_cfg_toolkey,
+                   lambda: self._pick_file(self.var_cfg_toolkey, "Select your .toolkey",
+                                           [("MHD tool key", "*.toolkey"),
+                                            ("All files", "*.*")]),
+                   tooltip="Stays on this machine - it is only copied into the "
+                           "temporary working folder").pack(fill=tk.X, pady=(0, 12))
+        self.var_library = tk.StringVar()
+        ui.PathRow(yours.body, "Folder with your XDFs and stock ROMs (optional)",
+                   self.var_library,
+                   lambda: self._pick_dir(self.var_library, "Select the folder"),
+                   browse_text="Choose…").pack(fill=tk.X)
+        tk.Label(yours.body,
+                 text="Only needed when stock ROM and XDF are not stored next to the "
+                      "tuned file. Subfolders are searched, matched by ROM id.",
+                 bg=ui.CARD, fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w",
+                 justify="left", wraplength=800).pack(fill=tk.X, pady=(6, 0))
+
         output = page.card("Output")
         self.var_cfg_outdir = tk.StringVar()
         ui.PathRow(output.body, "Default output folder", self.var_cfg_outdir,
@@ -1216,14 +1588,13 @@ class MhdLockTool(_TkBase):
         self.var_template.set(cfg.get("name_template", "{source}"))
         self.var_open_after.set(bool(cfg.get("open_after_success", True)))
         self.var_keep_staging.set(bool(cfg.get("keep_staging", False)))
-        self.var_outdir.set(cfg.get("output_dir", ""))
-        self.var_stock.set(cfg.get("last_stock", ""))
-        self.var_xdf.set(cfg.get("last_xdf", ""))
-        self.var_toolkey.set(cfg.get("last_toolkey", ""))
+        self.var_cfg_toolkey.set(cfg.get("toolkey", ""))
+        self.var_library.set(cfg.get("library_dir", ""))
         self.var_customer.set(cfg.get("last_customer", ""))
         for var in (self.var_exe, self.var_args, self.var_timeout, self.var_cfg_outdir,
-                    self.var_template):
+                    self.var_template, self.var_cfg_toolkey, self.var_library):
             var.trace_add("write", lambda *_: self._save_settings())
+        self._update_setup_hint()
 
     def _collect_settings(self) -> dict:
         try:
@@ -1240,9 +1611,8 @@ class MhdLockTool(_TkBase):
             "keep_staging": bool(self.var_keep_staging.get()),
             "open_after_success": bool(self.var_open_after.get()),
             "timeout": timeout,
-            "last_stock": self.var_stock.get().strip(),
-            "last_xdf": self.var_xdf.get().strip(),
-            "last_toolkey": self.var_toolkey.get().strip(),
+            "toolkey": self.var_cfg_toolkey.get().strip(),
+            "library_dir": self.var_library.get().strip(),
             "last_customer": self.var_customer.get().strip(),
         }
 
@@ -1251,6 +1621,8 @@ class MhdLockTool(_TkBase):
         ok = save_config(self.config_data)
         self.var_settings_summary.set("Saved automatically" if ok
                                       else "Could not write the settings file")
+        if hasattr(self, "setup_card"):
+            self._update_setup_hint()
 
     def _reset_settings(self):
         self.config_data = dict(DEFAULT_CONFIG)
@@ -1273,14 +1645,16 @@ class MhdLockTool(_TkBase):
             variable.set(path)
 
     def _current_job(self) -> LockJob:
+        tuned = self.var_tuned.get().strip()
         return LockJob(
             customer=self.var_customer.get().strip(),
             vin=normalise_vin(self.var_vin.get()),
             stock_bin=self.var_stock.get().strip(),
-            tuned_bin=self.var_tuned.get().strip(),
+            tuned_bin=tuned,
             xdf=self.var_xdf.get().strip(),
             toolkey=self.var_toolkey.get().strip(),
-            output_dir=self.var_outdir.get().strip(),
+            output_dir=(self.config_data.get("output_dir", "").strip()
+                        or (os.path.dirname(tuned) if tuned else "")),
         )
 
     def _definition(self, path: str) -> XdfDefinition | None:
@@ -1296,90 +1670,6 @@ class MhdLockTool(_TkBase):
             return None
         self._xdf_cache = (path, stamp, definition)
         return definition
-
-    # ── Pre-flight ───────────────────────────────────────────────────────────
-
-    def _cancel_preflight(self):
-        if self._preflight_after:
-            self.after_cancel(self._preflight_after)
-            self._preflight_after = None
-
-    def _schedule_preflight(self):
-        self._save_settings()
-        self._cancel_preflight()
-        if self._running:
-            return
-        self._preflight_after = self.after(400, self._run_preflight)
-
-    def _run_preflight(self, force=False):
-        # A pending debounce must never fire during a run — it would wipe the log.
-        self._cancel_preflight()
-        if self._running:
-            return
-        job = self._current_job()
-        ok_vin, vin, vin_msg = validate_vin(job.vin)
-        self.lbl_vin.config(text=("✓  " if ok_vin else "✕  ") + vin_msg,
-                            fg=ui.OK if ok_vin else ui.TEXT_FAINT if not job.vin else ui.ERR)
-        for path, row in ((job.stock_bin, self.row_stock), (job.tuned_bin, self.row_tuned),
-                          (job.xdf, self.row_xdf), (job.toolkey, self.row_toolkey)):
-            if not path:
-                row.set_hint("Not selected")
-            elif not os.path.isfile(path):
-                row.set_hint("File not found", "error")
-            else:
-                size = os.path.getsize(path)
-                row.set_hint(f"{os.path.basename(path)} · {human_size(size)}", "ok")
-
-        if not (job.stock_bin and job.tuned_bin and os.path.isfile(job.stock_bin)
-                and os.path.isfile(job.tuned_bin)):
-            if force:
-                self.log.set_text("Select at least the stock and the tuned .bin.", "warn")
-            self.var_summary.set("Waiting for input")
-            return
-
-        report = preflight(job, self._definition(job.xdf))
-        self._render_preflight(report, job)
-
-    def _render_preflight(self, report: Preflight, job: LockJob):
-        self.log.clear()
-        self.log.write("PRE-FLIGHT CHECKS", "dim")
-        self.log.write("─" * 62, "dim")
-        for issue in report.issues:
-            tag = {"error": "error", "warn": "warn"}.get(issue.level, "info")
-            mark = {"error": "✕", "warn": "!", "info": "·"}[issue.level]
-            self.log.write(f" {mark} {issue.text}", tag)
-        if report.regions:
-            definition = self._definition(job.xdf)
-            self.log.write("")
-            self.log.write(f"MODIFIED REGIONS ({len(report.regions)})", "dim")
-            self.log.write("─" * 62, "dim")
-            for start, length in report.regions[:25]:
-                names = definition.tables_at(start, length, report.file_size) if definition else []
-                label = ", ".join(names[:2]) if names else "— not in this XDF —"
-                self.log.write(f"  0x{start:07X}  {length:>6,} B   {label[:64]}",
-                               "accent" if names else "warn")
-            if len(report.regions) > 25:
-                self.log.write(f"  … and {len(report.regions) - 25} more region(s)", "dim")
-        if report.touched_tables:
-            self.log.write("")
-            self.log.write(f"TABLES TOUCHED ({len(report.touched_tables)})", "dim")
-            self.log.write("─" * 62, "dim")
-            for name in report.touched_tables[:20]:
-                self.log.write(f"  · {name[:70]}")
-            if len(report.touched_tables) > 20:
-                self.log.write(f"  … and {len(report.touched_tables) - 20} more", "dim")
-        self.log.scroll_top()
-
-        if report.ok:
-            self.log_card.set_hint("ready to lock", "ok")
-            self.var_summary.set(f"{report.changed_bytes:,} byte(s) changed · "
-                                 f"{len(report.touched_tables)} table(s) · checks passed")
-            self.status.set("Pre-flight passed", "ok")
-        else:
-            self.log_card.set_hint(f"{len(report.errors)} problem(s)", "error")
-            self.var_summary.set(report.errors[0].text if report.errors else "Checks failed")
-            self.status.set("Pre-flight failed", "error")
-        return report
 
     # ── Running ──────────────────────────────────────────────────────────────
 
@@ -1481,6 +1771,14 @@ class MhdLockTool(_TkBase):
                        line=f"━━ [{index + 1}/{len(jobs)}] {job.label} "
                             f"({os.path.basename(job.tuned_bin)})", tag="accent")
             self._post("job", index=index, status="running", output="", tag="busy")
+
+            if not (job.stock_bin and job.xdf and job.toolkey):
+                found = resolve_inputs(job.tuned_bin, cfg.get("library_dir", ""),
+                                       cfg.get("toolkey", ""))
+                job.stock_bin = job.stock_bin or found.stock
+                job.xdf = job.xdf or found.xdf
+                job.toolkey = job.toolkey or found.toolkey
+                job.vin = job.vin or found.vin
 
             report = preflight(job)
             for issue in report.issues:
@@ -1654,13 +1952,31 @@ class MhdLockTool(_TkBase):
         if not paths:
             return
         base = self._current_job()
+        unresolved = 0
         for path in paths:
-            self.batch_jobs.append(LockJob(
-                customer=base.customer or os.path.splitext(os.path.basename(path))[0],
-                vin=base.vin, stock_bin=base.stock_bin, tuned_bin=path,
-                xdf=base.xdf, toolkey=base.toolkey, output_dir=base.output_dir))
+            found = resolve_inputs(path, self.config_data.get("library_dir", ""),
+                                   self.config_data.get("toolkey", ""))
+            job = LockJob(
+                customer=os.path.splitext(os.path.basename(path))[0],
+                vin=found.vin or base.vin,
+                stock_bin=found.stock or base.stock_bin,
+                tuned_bin=path,
+                xdf=found.xdf or base.xdf,
+                toolkey=found.toolkey or base.toolkey,
+                output_dir=base.output_dir)
+            if not (job.stock_bin and job.xdf):
+                unresolved += 1
+            self.batch_jobs.append(job)
         self._batch_refresh()
-        self.batch_log.write(f"Added {len(paths)} job(s) to the queue.", "ok", follow=True)
+        self.batch_log.write(f"Added {len(paths)} job(s) - stock ROM and XDF resolved "
+                             f"per file.", "ok", follow=True)
+        if unresolved:
+            self.batch_log.write(f" ! {unresolved} job(s) without a stock ROM or XDF - "
+                                 f"set a library folder in Settings.", "warn", follow=True)
+        missing_vin = [j for j in self.batch_jobs if not validate_vin(j.vin)[0]]
+        if missing_vin:
+            self.batch_log.write(f" ! {len(missing_vin)} job(s) still need a VIN - select a "
+                                 f"row and fill it in below.", "warn", follow=True)
 
     def _batch_import_csv(self):
         path = filedialog.askopenfilename(title="Import batch CSV",

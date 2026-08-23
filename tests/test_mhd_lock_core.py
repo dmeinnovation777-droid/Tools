@@ -489,3 +489,100 @@ class TestRunnerEdgeCases(unittest.TestCase):
         result = m.run_builder(os.path.join(self.dir, "does-not-exist.exe"), self.dir)
         self.assertFalse(result.ok)
         self.assertTrue(result.launch_error)
+
+
+class TestAutomaticResolution(unittest.TestCase):
+    """One picked file must be enough — that is the whole point of the tool."""
+
+    ROM_ID = "00005C6414C808"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.car = os.path.join(self.tmp.name, "M4 Kunde")
+        os.makedirs(self.car)
+        stock = bytearray(0x2000)
+        stock[0x100:0x107] = bytes.fromhex(self.ROM_ID)   # packed, as in a real ROM
+        self.stock = write(os.path.join(self.car, f"{self.ROM_ID}_original.bin"), bytes(stock))
+        tuned = bytearray(stock)
+        tuned[0x800:0x810] = b"\xAA" * 16
+        self.tuned = write(os.path.join(self.car, "Kunde tune v2.bin"), bytes(tuned))
+        self.xdf = write(os.path.join(self.car, f"{self.ROM_ID}.xdf"), SAMPLE_XDF)
+        self.key = write(os.path.join(self.car, "Gen.toolkey"), b"\x00" * 128)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_everything_comes_from_the_tuned_file(self):
+        found = m.resolve_inputs(self.tuned)
+        self.assertEqual(found.stock, self.stock)
+        self.assertEqual(found.xdf, self.xdf)
+        self.assertEqual(found.toolkey, self.key)
+        self.assertEqual(found.rom_id, self.ROM_ID)
+        self.assertTrue(found.complete)
+        self.assertEqual(found.source("stock"), "matched by ROM id")
+
+    def test_vin_is_reused_from_a_previous_run(self):
+        write(os.path.join(self.car, "DMETEST0000000001_vin.txt"), "")
+        self.assertEqual(m.resolve_inputs(self.tuned).vin, "DMETEST0000000001")
+
+    def test_invalid_vin_file_is_ignored(self):
+        write(os.path.join(self.car, "SHORT_vin.txt"), "")
+        self.assertEqual(m.resolve_inputs(self.tuned).vin, "")
+
+    def test_companions_are_found_in_a_library_folder(self):
+        library = os.path.join(self.tmp.name, "library", "S55")
+        os.makedirs(library)
+        os.replace(self.stock, os.path.join(library, os.path.basename(self.stock)))
+        os.replace(self.xdf, os.path.join(library, os.path.basename(self.xdf)))
+        found = m.resolve_inputs(self.tuned, library_dir=os.path.join(self.tmp.name, "library"))
+        self.assertTrue(found.stock.startswith(library))
+        self.assertTrue(found.xdf.startswith(library))
+        self.assertTrue(found.complete)
+
+    def test_a_foreign_rom_is_not_picked_up(self):
+        """A library entry for another car must not be matched."""
+        library = os.path.join(self.tmp.name, "library")
+        os.makedirs(library)
+        write(os.path.join(library, "00001A841D1401_original.bin"), bytes(0x2000))
+        write(os.path.join(library, "00001A841D1401.xdf"), SAMPLE_XDF)
+        os.remove(self.stock)
+        os.remove(self.xdf)
+        found = m.resolve_inputs(self.tuned, library_dir=library)
+        self.assertEqual(found.stock, "")
+        self.assertEqual(found.xdf, "")
+        self.assertFalse(found.complete)
+
+    def test_unnamed_files_still_work_in_the_same_folder(self):
+        """Files without a ROM id in the name: the only obvious one wins."""
+        plain_stock = os.path.join(self.car, "stock_original.bin")
+        plain_xdf = os.path.join(self.car, "definition.xdf")
+        os.replace(self.stock, plain_stock)
+        os.replace(self.xdf, plain_xdf)
+        found = m.resolve_inputs(self.tuned)
+        self.assertEqual(found.stock, plain_stock)
+        self.assertEqual(found.xdf, plain_xdf)
+        self.assertEqual(found.source("stock"), "only stock ROM in the folder")
+
+    def test_the_tuned_file_is_never_its_own_stock(self):
+        tuned = write(os.path.join(self.car, "something_original.bin"), bytes(0x2000))
+        found = m.resolve_inputs(tuned)
+        self.assertNotEqual(found.stock, tuned)
+
+    def test_configured_key_wins_over_a_stray_one(self):
+        other = write(os.path.join(self.tmp.name, "Mein.toolkey"), b"\x01" * 128)
+        found = m.resolve_inputs(self.tuned, toolkey=other)
+        self.assertEqual(found.toolkey, other)
+        self.assertEqual(found.source("toolkey"), "from settings")
+
+    def test_id_matching_is_exact(self):
+        self.assertEqual(m.ids_in_name("/x/00005C6414C808_original.bin"), ["00005C6414C808"])
+        self.assertEqual(m.ids_in_name("/x/tune v2.bin"), [])
+        data = bytes(16) + bytes.fromhex(self.ROM_ID) + bytes(16)
+        self.assertTrue(m.id_in_image(data, self.ROM_ID))
+        self.assertFalse(m.id_in_image(data, "00001A841D1401"))
+        self.assertFalse(m.id_in_image(data, "nothex"))
+
+    def test_missing_file_is_handled(self):
+        found = m.resolve_inputs(os.path.join(self.car, "nope.bin"))
+        self.assertFalse(found.complete)
+        self.assertTrue(found.notes)

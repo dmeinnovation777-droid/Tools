@@ -16,7 +16,7 @@
 | Tool | Zweck |
 | --- | --- |
 | **AutoTuner Backup Tool** | AutoTuner-Backups (`.zip`/`.bak`) zu einer durchgehenden `.bin` zusammenführen und wieder zurück verpacken |
-| **MHD Lock Tool** | Das Locken von MHD+ Tune-Files automatisieren: Vorprüfung, sauberes Arbeitsverzeichnis, Lauf des MHD-Tools, Ablage der `.mhd` |
+| **MHD Lock Tool** | Locken von MHD+ Tune-Files: getunte Datei wählen, VIN eintippen, fertig — Stock-ROM, XDF und Tool-Key findet die App selbst |
 
 Beide laufen mit der Python-Standardbibliothek (nur `tkinter` für die
 Oberfläche) — keine Fremdpakete zur Laufzeit.
@@ -43,7 +43,7 @@ Oberfläche) — keine Fremdpakete zur Laufzeit.
 unter *Assets*:
 
 ```
-DME-Innovation-Tools-Setup-1.0.0.exe
+DME-Innovation-Tools-Setup-1.1.0.exe
 ```
 
 Windows zeigt bei unsignierten Setups „Der Computer wurde durch Windows
@@ -147,10 +147,47 @@ zweite `.toolkey`, eine Datei ohne Änderungen. Genau das fängt dieses Tool ab.
 
 ### Ablauf
 
-1. **Kunde & VIN** eintragen — die VIN wird live geprüft (17 Zeichen, ohne
-   I/O/Q).
-2. **Dateien** wählen: Stock-ROM, getunte ROM, XDF, `.toolkey`.
-3. **Pre-flight** läuft automatisch bei jeder Änderung und meldet:
+**Einmal einrichten** (Tab *Settings*): Pfad zur eigenen MHD-Exe und zur
+`.toolkey`. Optional ein Ordner mit XDFs und Stock-ROMs, falls die nicht neben
+den Kundendateien liegen.
+
+**Danach pro Auftrag zwei Eingaben:**
+
+1. **Getunte Datei wählen.** Stock-ROM, XDF und Tool-Key findet die App selbst —
+   siehe unten.
+2. **VIN eintippen.** Wird live geprüft (17 Zeichen, ohne I/O/Q) und automatisch
+   in Großbuchstaben normiert.
+3. **Lock now.**
+
+### Wie die App die restlichen Dateien findet
+
+Die BMW-Programmnummer steht als sieben gepackte Bytes im ROM
+(`00005C6414C808` → `00 00 5C 64 14 C8 08`). Die App liest sie nicht heraus,
+sondern **prüft umgekehrt**: für jede Kandidatendatei im Ordner wird die
+Nummer aus dem Dateinamen genommen und geschaut, ob sie wirklich im getunten
+Image steht. Nur dann gilt die Datei als passend — eine XDF vom Nachbarauto
+wird so nie versehentlich genommen.
+
+Gesucht wird zuerst im Ordner der getunten Datei, danach im optionalen
+Bibliotheksordner samt Unterordnern. Ohne Nummer im Namen greift die
+Rückfallregel „die einzige eindeutige Datei im selben Ordner".
+
+Ein typischer Kundenordner braucht also gar keine Einrichtung:
+
+```
+00005C6414C808.xdf              ← per ROM-Nummer erkannt
+00005C6414C808_original.bin     ← per ROM-Nummer erkannt
+Gen.toolkey                     ← daneben gefunden
+WBS…_vin.txt                    ← VIN wird übernommen, falls schon vorhanden
+MAP1 E45 MAP2 E30 v4.bin        ← die eine Datei, die du auswählst
+```
+
+Was die App ermittelt hat, steht mit Häkchen und Quelle direkt unter der
+Dateiauswahl. Stimmt etwas nicht, klappt **Change manually** die drei Felder auf.
+
+### Prüfungen
+
+Die **Vorprüfung** läuft automatisch bei jeder Änderung und meldet:
    - fehlende oder doppelte Eingaben, falsche VIN, nicht vorhandener Ausgabeordner
    - unterschiedliche Dateigrößen von Stock und Tune
    - identische Dateien (der Builder würde `NO modifications found` melden)
@@ -159,13 +196,14 @@ zweite `.toolkey`, eine Datei ohne Änderungen. Genau das fängt dieses Tool ab.
    - Änderungen, die diese XDF nicht beschreibt (rein informativ — der Builder
      bringt eigene Tabellendefinitionen mit)
    - abweichende Software-IDs zwischen Stock und Tune
-4. **Lock now** — das Tool legt ein sauberes Arbeitsverzeichnis an, startet den
-   Builder darin, zeigt dessen Ausgabe live und farbig, holt die erzeugte
-   `.mhd` ab, benennt sie nach Vorlage und legt ein `.log` mit Prüfergebnis und
-   Builder-Ausgabe daneben.
+Beim Locken legt das Tool ein sauberes Arbeitsverzeichnis an, startet den
+Builder darin, zeigt dessen Ausgabe live und farbig, holt die erzeugte `.mhd`
+ab, benennt sie nach Vorlage und legt ein `.log` mit Prüfergebnis und
+Builder-Ausgabe daneben.
 
-**Prepare folder only** baut nur das Arbeitsverzeichnis — falls du den Builder
-lieber selbst startest.
+Unter **Details and builder log** liegen das vollständige Protokoll und
+**Prepare folder only** — das baut nur das Arbeitsverzeichnis, falls du den
+Builder lieber selbst startest.
 
 ### Arbeitsverzeichnis
 
@@ -190,8 +228,9 @@ Danach wird der Ordner wieder entfernt (abschaltbar unter **Advanced**).
 Mehrere Kunden in einem Durchgang. Jeder Job bekommt sein eigenes
 Arbeitsverzeichnis — eine kaputte Datei kann keinen anderen Kunden beeinflussen.
 
-- **Add tuned files…** übernimmt Stock-ROM, XDF, `.toolkey` und VIN aus dem
-  Lock-Tab.
+- **Add tuned files…** löst Stock-ROM, XDF und Tool-Key für **jede Datei
+  einzeln** auf — Tunes verschiedener Autos dürfen in derselben Warteschlange
+  stehen. Fehlt eine VIN, sagt das Log welche Zeilen betroffen sind.
 - **Import CSV…** liest eine Liste:
 
   ```csv
@@ -212,6 +251,8 @@ Arbeitsverzeichnis — eine kaputte Datei kann keinen anderen Kunden beeinflusse
 | Einstellung | Bedeutung |
 | --- | --- |
 | Pfad zum Builder | deine `TuningMapBuilder-*.exe` bzw. MHD Map Encryption |
+| MHD tool key | deine `.toolkey` — einmal setzen, gilt für jeden Auftrag |
+| Ordner mit XDFs und Stock-ROMs | optional; nur nötig, wenn diese nicht neben der getunten Datei liegen |
 | Extra-Argumente | normalerweise leer |
 | Timeout pro Job | Abbruch, falls der Builder hängt |
 | Builder ins Arbeitsverzeichnis kopieren | entspricht dem Handbetrieb (empfohlen) |
@@ -251,7 +292,7 @@ build_exe.bat           :: nur die drei .exe, ohne Setup
 (`winget install JRSoftware.InnoSetup`). Ergebnis:
 
 ```
-dist\DME-Innovation-Tools-Setup-1.0.0.exe
+dist\DME-Innovation-Tools-Setup-1.1.0.exe
 dist\DME Innovation Tools.exe
 dist\AutoTuner Backup Tool.exe
 dist\MHD Lock Tool.exe
@@ -307,7 +348,7 @@ komplette Palette oben in `dme_ui.py`.
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v        # 66 Tests, keine Anzeige nötig
+python -m unittest discover -s tests -v        # 81 Tests, keine Anzeige nötig
 
 # GUI-Tests (brauchen tkinter und eine Anzeige)
 xvfb-run -a -s "-screen 0  880x560x24" python tests/smoke_gui_suite.py

@@ -701,3 +701,80 @@ class Page(tk.Frame):
     def summary(self, variable):
         tk.Label(self.action_row, textvariable=variable, bg=SURFACE, fg=TEXT_DIM,
                  font=f("small"), anchor="w").pack(side=tk.LEFT)
+
+
+class Collapsible(tk.Frame):
+    """A disclosure section — everything that is only needed occasionally."""
+
+    def __init__(self, parent, title, bg=BG, expanded=False, on_toggle=None):
+        super().__init__(parent, bg=bg)
+        self._bg = bg
+        self._expanded = False
+        self._on_toggle = on_toggle
+        self._title = title
+
+        self._header = tk.Label(self, text="", bg=bg, fg=TEXT_DIM, font=f("small"),
+                                anchor="w", cursor="hand2", padx=0, pady=6)
+        self._header.pack(fill=tk.X)
+        self._header.bind("<Button-1>", lambda _e: self.toggle())
+        on_hover(self._header, bg, bg, fg_normal=TEXT_DIM, fg_active=TEXT)
+
+        self.body = tk.Frame(self, bg=bg)
+        self._render()
+        if expanded:
+            self.expand()
+
+    def _render(self):
+        arrow = "▾" if self._expanded else "▸"
+        self._header.configure(text=f"{arrow}  {self._title}")
+
+    def expand(self):
+        if not self._expanded:
+            self._expanded = True
+            self.body.pack(fill=tk.BOTH, expand=True)
+            self._render()
+            if self._on_toggle:
+                self._on_toggle(True)
+
+    def collapse(self):
+        if self._expanded:
+            self._expanded = False
+            self.body.pack_forget()
+            self._render()
+            if self._on_toggle:
+                self._on_toggle(False)
+
+    def toggle(self):
+        self.collapse() if self._expanded else self.expand()
+
+    @property
+    def expanded(self) -> bool:
+        return self._expanded
+
+    def set_title(self, title):
+        self._title = title
+        self._render()
+
+
+class ResolvedRow(tk.Frame):
+    """One auto-detected input: state icon, label, file name, where it came from."""
+
+    def __init__(self, parent, label, bg=CARD):
+        super().__init__(parent, bg=bg)
+        self._icon = tk.Label(self, text="·", bg=bg, fg=TEXT_FAINT, font=f("h2"), width=2)
+        self._icon.pack(side=tk.LEFT)
+        tk.Label(self, text=label, bg=bg, fg=TEXT_DIM, font=f("small"), width=11,
+                 anchor="w").pack(side=tk.LEFT)
+        self._value = tk.Label(self, text="—", bg=bg, fg=TEXT_FAINT, font=f("mono"),
+                               anchor="w")
+        self._value.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._source = tk.Label(self, text="", bg=bg, fg=TEXT_FAINT, font=f("small"),
+                                anchor="e")
+        self._source.pack(side=tk.RIGHT)
+
+    def set(self, value, source="", ok=True):
+        self._icon.configure(text="✓" if ok and value else "✕" if not value else "·",
+                             fg=OK if (ok and value) else ERR)
+        self._value.configure(text=value or "not found",
+                              fg=TEXT if value else ERR)
+        self._source.configure(text=source)
