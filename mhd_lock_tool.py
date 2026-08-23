@@ -75,6 +75,14 @@ ERROR_MARKERS = (
     "Unsupported DME", "Prozess not supported", "Failed to serialize",
     "Unhandled area", "Unhandled exception",
 )
+# The builder ends on Console.ReadKey(). With stdin redirected .NET raises
+# InvalidOperationException *after* the map has already been written — noise,
+# not a failure.
+BENIGN_MARKERS = (
+    "Cannot read keys",
+    "Press a key",
+    "System.Console.ReadKey",
+)
 WARN_MARKERS = (
     "WARNING", "bytes not referenced in the XDFs", "MUST FIX axis",
     "Skipped axis", "Missing tables:", "Duplicate:", "Doublon ",
@@ -597,6 +605,8 @@ def classify_line(line: str) -> str:
         return ""
     if any(marker in text for marker in SUCCESS_MARKERS):
         return "ok"
+    if any(marker in text for marker in BENIGN_MARKERS):
+        return "dim"
     if any(marker in text for marker in ERROR_MARKERS):
         return "error"
     if any(marker in text for marker in WARN_MARKERS):
@@ -671,6 +681,7 @@ def run_builder(exe: str, workdir: str, extra_args=None, pass_workdir=False,
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
     lines: list[str] = []
+    state = {"timed_out": False}
     try:
         process = subprocess.Popen(
             command, cwd=workdir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -681,7 +692,11 @@ def run_builder(exe: str, workdir: str, extra_args=None, pass_workdir=False,
         result.launch_error = f"Could not start the builder: {exc}"
         return result
 
-    timer = threading.Timer(timeout, process.kill)
+    def _on_timeout():
+        state["timed_out"] = True
+        process.kill()
+
+    timer = threading.Timer(timeout, _on_timeout)
     timer.daemon = True
     timer.start()
     try:
@@ -708,7 +723,12 @@ def run_builder(exe: str, workdir: str, extra_args=None, pass_workdir=False,
 
     result = parse_builder_output(lines)
     result.returncode = process.returncode
-    result.timed_out = not timer.is_alive() and process.returncode not in (0, None) and False
+    result.timed_out = state["timed_out"]
+    if result.timed_out:
+        result.errors.append(f"Timeout after {timeout} s - the builder was stopped. "
+                             f"Raise the timeout in Settings if the job needs longer.")
+    elif stop_event is not None and stop_event.is_set():
+        result.errors.append("Stopped on request.")
     return result
 
 

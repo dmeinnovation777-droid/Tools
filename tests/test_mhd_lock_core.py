@@ -424,3 +424,68 @@ class TestConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestRunnerEdgeCases(unittest.TestCase):
+    """The builder's exit is messy — these are the cases that decide the verdict."""
+
+    def _stub(self, body):
+        path = os.path.join(self.dir, "stub.sh")
+        write(path, "#!/bin/sh\n" + body)
+        os.chmod(path, 0o755)
+        return path
+
+    def setUp(self):
+        if os.name == "nt":
+            self.skipTest("shell stubs are POSIX only")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_readkey_crash_after_success_is_not_a_failure(self):
+        """.NET throws on Console.ReadKey with stdin redirected — after the write."""
+        result = m.parse_builder_output([
+            "Map correctly written : tune.mhd",
+            "Press a key...",
+            "Unhandled Exception: System.InvalidOperationException: Cannot read keys when "
+            "either application does not have a console or when console input has been "
+            "redirected from a file. Try Console.Read.",
+            "   at System.Console.ReadKey(Boolean intercept)",
+        ])
+        self.assertTrue(result.ok, result.errors)
+        self.assertEqual(result.written, ["tune.mhd"])
+        self.assertEqual(result.errors, [])
+
+    def test_a_real_error_still_wins(self):
+        result = m.parse_builder_output([
+            "Error - several .toolkey detected.",
+            "Press a key...",
+        ])
+        self.assertFalse(result.ok)
+        self.assertEqual(len(result.errors), 1)
+
+    def test_successful_stub_run(self):
+        exe = self._stub('echo "Map correctly written : out.mhd"\n'
+                         'echo "Press a key..."\n')
+        seen = []
+        result = m.run_builder(exe, self.dir, on_line=lambda line, tag: seen.append((line, tag)))
+        self.assertTrue(result.ok, result.errors)
+        self.assertEqual(result.written, ["out.mhd"])
+        self.assertIn(("Press a key...", "dim"), seen)
+        self.assertFalse(result.timed_out)
+
+    def test_timeout_is_reported_as_a_timeout(self):
+        # exec: the shell is replaced, so killing the process really frees the
+        # pipe instead of leaving a grandchild holding it open
+        exe = self._stub("exec sleep 30\n")
+        result = m.run_builder(exe, self.dir, timeout=1)
+        self.assertTrue(result.timed_out)
+        self.assertFalse(result.ok)
+        self.assertIn("Timeout", result.errors[0])
+
+    def test_unstartable_builder_is_reported(self):
+        result = m.run_builder(os.path.join(self.dir, "does-not-exist.exe"), self.dir)
+        self.assertFalse(result.ok)
+        self.assertTrue(result.launch_error)
