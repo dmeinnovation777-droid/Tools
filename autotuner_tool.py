@@ -16,19 +16,20 @@ import os
 import sys
 import zipfile
 
+import dme_brand as brand
+
 try:
     import tkinter as tk
     from tkinter import filedialog
 
-    import dme_brand as brand
     import dme_ui as ui
     TK_AVAILABLE = True
 except ImportError:  # headless box / python3-tk not installed
-    tk = filedialog = brand = ui = None
+    tk = filedialog = ui = None
     TK_AVAILABLE = False
 
 APP_NAME = "AutoTuner Backup Tool"
-APP_VERSION = "1.1"
+APP_VERSION = brand.VERSION
 APP_TAGLINE = "ZIP ↔ BIN converter for AutoTuner ECU backups"
 
 
@@ -815,7 +816,7 @@ class AutoTunerTool(_TkBase):
 
 def main() -> int:
     if not TK_AVAILABLE:
-        print(f"{APP_NAME} v{APP_VERSION} — DME Innovation", file=sys.stderr)
+        print(f"{APP_NAME} v{APP_VERSION} — {brand.VENDOR}", file=sys.stderr)
         print("tkinter is not available in this Python installation.", file=sys.stderr)
         print("Windows/macOS: reinstall Python and tick 'tcl/tk and IDLE'.", file=sys.stderr)
         print("Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)

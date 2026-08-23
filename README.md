@@ -3,10 +3,11 @@
   <img src="assets/dme-logo-black.png#gh-light-mode-only" width="320" alt="DME Innovation">
 </p>
 
-# DME Innovation — Tuning Tools
+<h1 align="center">DME Innovation Tools</h1>
 
-Zwei Windows-Werkzeuge für die tägliche Arbeit am Steuergerät, im gleichen
-Look und auf einer gemeinsamen Code-Basis:
+<p align="center">Zwei Windows-Werkzeuge für die Arbeit am Steuergerät — in einer Installation.</p>
+
+![DME Innovation Tools](docs/screenshot-suite-launcher.png)
 
 | Tool | Zweck |
 | --- | --- |
@@ -20,10 +21,10 @@ Oberfläche) — keine Fremdpakete zur Laufzeit.
 
 ## Inhalt
 
-- [Schnellstart](#schnellstart)
+- [Installation](#installation)
 - [AutoTuner Backup Tool](#autotuner-backup-tool)
 - [MHD Lock Tool](#mhd-lock-tool)
-- [Windows-.exe bauen](#windows-exe-bauen)
+- [Selbst bauen](#selbst-bauen)
 - [Projektstruktur](#projektstruktur)
 - [Branding anpassen](#branding-anpassen)
 - [Tests](#tests)
@@ -31,17 +32,42 @@ Oberfläche) — keine Fremdpakete zur Laufzeit.
 
 ---
 
-## Schnellstart
+## Installation
+
+**Eine Datei, ein Doppelklick:**
+
+```
+DME-Innovation-Tools-Setup-1.0.0.exe
+```
+
+Das Setup installiert beide Werkzeuge samt Starter, legt Startmenü- und
+(optional) Desktop-Verknüpfungen an und bringt einen Uninstaller mit.
+Standardmäßig wird nur für den aktuellen Benutzer installiert — dann fragt
+Windows nicht nach Administratorrechten; im Assistenten lässt sich auch „für
+alle Benutzer" wählen. Deutsch und Englisch stehen zur Auswahl.
+
+Installiert werden:
+
+```
+DME Innovation Tools.exe      Starter — zeigt beide Werkzeuge zur Auswahl
+AutoTuner Backup Tool.exe
+MHD Lock Tool.exe
+```
+
+Die Setup-Datei entsteht mit `build_installer.bat` (siehe
+[Selbst bauen](#selbst-bauen)) oder automatisch im GitHub-Actions-Lauf, der sie
+als Artefakt `DME-Innovation-Tools-Setup-<version>` anhängt.
+
+**Ohne Installation, direkt aus den Quellen:**
 
 ```bat
 :: Python 3.10 oder neuer, bei der Installation "tcl/tk and IDLE" anhaken
-python autotuner_tool.py
+python dme_suite.py          :: Starter
+python autotuner_tool.py     :: oder direkt ein Werkzeug
 python mhd_lock_tool.py
 ```
 
 Auf Linux zusätzlich `sudo apt install python3-tk`.
-
-Fertige `.exe` ohne Python: siehe [Windows-.exe bauen](#windows-exe-bauen).
 
 ---
 
@@ -104,7 +130,7 @@ Das Tool **automatisiert den Ablauf rund um das offizielle MHD Map Encryption
 Tool** (TuningMapBuilder / XDF_Tools), so wie ihn der MHD+ Tuning Guide
 beschreibt. Es verschlüsselt nichts selbst, ersetzt nichts und umgeht nichts —
 das Locken erledigt weiterhin deine eigene lizenzierte MHD-Exe, die du unter
-**Settings** einträgst. Die Exe ist absichtlich nicht Teil dieses Repos.
+**Settings** einträgst. Die Exe ist absichtlich nicht Teil dieses Projekts.
 
 Der Handbetrieb scheitert fast immer an denselben Kleinigkeiten: zwei XDFs im
 Ordner, eine vergessene `_vin.txt`, eine falsch benannte Stock-Datei, eine
@@ -189,6 +215,8 @@ Arbeitsverzeichnis — eine kaputte Datei kann keinen anderen Kunden beeinflusse
 Gespeichert wird automatisch nach
 `%APPDATA%\DME Innovation\mhd_lock_tool.json`
 (macOS `~/Library/Application Support/…`, Linux `~/.config/…`).
+Eine Deinstallation lässt diese Datei stehen, damit eine Neuinstallation den
+Builder-Pfad wiederfindet.
 
 ### Erfolg und Fehler
 
@@ -201,38 +229,48 @@ erkannt, rot hervorgehoben und in den Job-Report übernommen.
 
 ---
 
-## Windows-.exe bauen
+## Selbst bauen
+
+Auf einem Windows-Rechner mit Python:
 
 ```bat
-build_exe.bat
+build_installer.bat     :: baut die drei .exe und daraus das Setup
+build_exe.bat           :: nur die drei .exe, ohne Setup
 ```
 
-Das Skript installiert PyInstaller und baut beide Programme nach `dist\`:
+`build_installer.bat` benötigt zusätzlich [Inno Setup 6](https://jrsoftware.org/isdl.php)
+(`winget install JRSoftware.InnoSetup`). Ergebnis:
 
 ```
+dist\DME-Innovation-Tools-Setup-1.0.0.exe
+dist\DME Innovation Tools.exe
 dist\AutoTuner Backup Tool.exe
 dist\MHD Lock Tool.exe
 ```
 
-Ohne Windows-Rechner: der GitHub-Actions-Workflow
-`.github/workflows/build.yml` baut beide `.exe` auf einem Windows-Runner und
-hängt sie als Artefakt an den Lauf.
+Ohne Windows-Rechner: der Workflow `.github/workflows/build.yml` baut auf einem
+Windows-Runner beide Programme und das Setup und hängt alles als Artefakt an den
+Lauf. Die Versionsnummer kommt aus `dme_brand.VERSION` — dort ändern, und
+Programme, Setup und Dateiname ziehen mit.
 
 ---
 
 ## Projektstruktur
 
 ```
+dme_suite.py             Starter — listet die Werkzeuge und startet sie
 autotuner_tool.py        AutoTuner Backup Tool (Logik + GUI)
 mhd_lock_tool.py         MHD Lock Tool (Logik + GUI)
 dme_ui.py                gemeinsames Design-System (Cards, Tabs, Banner, Tabellen …)
-dme_brand.py             eingebettetes DME-Logo, Fenster-Icon
+dme_brand.py             Produktname, Version, eingebettetes DME-Logo, Fenster-Icon
+installer/               Inno-Setup-Skript für das Windows-Setup
+build_exe.bat            PyInstaller-Build der drei Programme
+build_installer.bat      Build inklusive Setup-Datei
 tools/generate_assets.py erzeugt alle Logo-Assets aus dem Vektor-Master
 tools/xwd2png.py         Screenshot-Helfer für die headless GUI-Tests
 assets/                  Icon, Wortmarken, Logo-Quelle (.ai)
 tests/                   Unit-Tests und GUI-Smoke-Tests
 docs/                    Screenshots
-build_exe.bat            PyInstaller-Build für beide Tools
 ```
 
 ---
@@ -249,19 +287,21 @@ python tools/generate_assets.py --check  # nur prüfen, ob alles aktuell ist
 ```
 
 Erzeugt werden Icon (16–256 px als `.ico`), Wortmarke in Schwarz und Weiß sowie
-die base64-Blobs, die direkt in `dme_brand.py` liegen — die Tools brauchen zur
-Laufzeit also keine Bilddateien.
+die base64-Blobs, die direkt in `dme_brand.py` liegen — die Programme brauchen
+zur Laufzeit also keine Bilddateien.
 
-Die Akzentfarbe und die komplette Palette stehen oben in `dme_ui.py`.
+Produktname und Version stehen oben in `dme_brand.py`, die Akzentfarbe und die
+komplette Palette oben in `dme_ui.py`.
 
 ---
 
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v        # 57 Tests, keine Anzeige nötig
+python -m unittest discover -s tests -v        # 66 Tests, keine Anzeige nötig
 
 # GUI-Tests (brauchen tkinter und eine Anzeige)
+xvfb-run -a -s "-screen 0  880x560x24" python tests/smoke_gui_suite.py
 xvfb-run -a -s "-screen 0 1000x800x24" python tests/smoke_gui_autotuner.py
 xvfb-run -a -s "-screen 0 1040x820x24" python tests/smoke_gui_mhd_lock.py
 ```
@@ -269,12 +309,14 @@ xvfb-run -a -s "-screen 0 1040x820x24" python tests/smoke_gui_mhd_lock.py
 Der GUI-Test des Lock Tools ersetzt den lizenzierten Builder durch ein Stub-
 Skript, das dieselben Konsolenmeldungen ausgibt — damit läuft die komplette
 Kette (Prüfung → Staging → Lauf → Ablage) auch ohne MHD-Software durch.
+Weitere Tests halten Starter, Build-Skript und Installer synchron: ein
+umbenanntes Werkzeug fällt sofort auf, statt erst im Setup.
 
 ---
 
 ## Wichtige Hinweise
 
-- **Keine Fremdsoftware im Repo.** Weder das MHD Map Encryption Tool noch der
+- **Keine Fremdsoftware im Projekt.** Weder das MHD Map Encryption Tool noch der
   MHD+ Tuning Guide liegen hier — beides gehört MHD Tuning und bleibt bei dir.
 - **Keine Kundendaten committen.** `.toolkey`, `*_vin.txt`, `*.mhd` und
   `TuningMapBuilder*.exe` stehen in der `.gitignore`. Die VIN in den Screenshots

@@ -32,9 +32,11 @@ jobs:
         run: xvfb-run -a -s "-screen 0 1000x800x24" python tests/smoke_gui_autotuner.py
       - name: MHD Lock Tool
         run: xvfb-run -a -s "-screen 0 1040x820x24" python tests/smoke_gui_mhd_lock.py
+      - name: Suite launcher
+        run: xvfb-run -a -s "-screen 0 880x560x24" python tests/smoke_gui_suite.py
 
   build-windows:
-    name: Build Windows executables
+    name: Build Windows installer
     runs-on: windows-latest
     needs: [test]
     steps:
@@ -44,6 +46,14 @@ jobs:
           python-version: "3.12"
       - name: Install PyInstaller
         run: python -m pip install --upgrade pip pyinstaller
+      - name: Read the suite version
+        id: version
+        shell: bash
+        run: echo "value=$(python -c 'import dme_brand; print(dme_brand.VERSION)')" >> "$GITHUB_OUTPUT"
+      - name: Build the launcher
+        run: >
+          pyinstaller --onefile --windowed --noconfirm --clean
+          --name "DME Innovation Tools" --icon assets/dme-icon.ico dme_suite.py
       - name: Build AutoTuner Backup Tool
         run: >
           pyinstaller --onefile --windowed --noconfirm --clean
@@ -52,9 +62,25 @@ jobs:
         run: >
           pyinstaller --onefile --windowed --noconfirm --clean
           --name "MHD Lock Tool" --icon assets/dme-icon.ico mhd_lock_tool.py
-      - name: Upload executables
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build the installer
+        run: >
+          & "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe"
+          /DAppVersion=${{ steps.version.outputs.value }}
+          installer\dme-innovation-tools.iss
+      - name: Upload the installer
         uses: actions/upload-artifact@v4
         with:
-          name: dme-tools-windows
-          path: dist/*.exe
+          name: DME-Innovation-Tools-Setup-${{ steps.version.outputs.value }}
+          path: dist/DME-Innovation-Tools-Setup-*.exe
+          if-no-files-found: error
+      - name: Upload the plain executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: dme-tools-windows-exe
+          path: |
+            dist/DME Innovation Tools.exe
+            dist/AutoTuner Backup Tool.exe
+            dist/MHD Lock Tool.exe
           if-no-files-found: error

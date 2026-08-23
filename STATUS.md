@@ -14,9 +14,15 @@ Bedienung und Aufbau stehen im [README](README.md).
 | Gemeinsames Design-System `dme_ui.py` | fertig |
 | AutoTuner Backup Tool | fertig, 13 Unit-Tests + GUI-Smoke-Test |
 | MHD Lock Tool | fertig, 44 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
-| README, `build_exe.bat`, GitHub-Actions-Build | fertig |
+| Starter `dme_suite.py` | fertig, 9 Unit-Tests + GUI-Smoke-Test |
+| Windows-Setup (Inno Setup) + CI-Build | fertig |
+| README, Build-Skripte | fertig |
 
-`python -m unittest discover -s tests` → 57 Tests, grün.
+`python -m unittest discover -s tests` → 66 Tests, grün.
+
+Produktname und Version stehen zentral in `dme_brand.py`
+(`SUITE = "DME Innovation Tools"`, `VERSION = "1.0.0"`); beide Werkzeuge, das
+Setup und der Dateiname der Setup-Datei ziehen daraus.
 
 ---
 
@@ -131,6 +137,30 @@ span     = (rows-1)*row_step + (cols-1)*col_step + element
 
 `BASEOFFSET` wird nicht geraten: alle Interpretationen werden durchgerechnet und
 die genommen, bei der sämtliche Bereiche in die ROM-Größe passen.
+
+---
+
+## 3.5 Auslieferung
+
+Eine Installationsdatei für den PC:
+`dist\DME-Innovation-Tools-Setup-<version>.exe`, gebaut aus
+`installer/dme-innovation-tools.iss` (Inno Setup 6).
+
+* Installiert Starter plus beide Werkzeuge, Startmenü-Gruppe, optionale
+  Desktop-Verknüpfung, Uninstaller; Deutsch und Englisch.
+* `PrivilegesRequired=lowest` mit `PrivilegesRequiredOverridesAllowed=dialog`:
+  standardmäßig Installation je Benutzer ohne UAC-Abfrage, „für alle Benutzer"
+  ist im Assistenten wählbar.
+* Die `AppId` ist ein fester, aus der Projektidentität abgeleiteter GUID —
+  Updates ersetzen die vorhandene Installation, statt sie zu duplizieren.
+* Die Einstellungsdatei unter `%APPDATA%\DME Innovation` bleibt bei einer
+  Deinstallation erhalten (Builder-Pfad).
+* Das `.iss` ist bewusst reines ASCII — Inno Setup verlangt sonst eine BOM.
+* Der Starter findet die Werkzeuge relativ zu sich selbst: im Build neben der
+  `.exe`, aus den Quellen neben dem Skript (`resolve_tool`). Unter Windows wird
+  aus den Quellen `pythonw.exe` bevorzugt, damit kein Konsolenfenster aufblitzt.
+* Ein Test hält Starter, `build_exe.bat` und `.iss` synchron: ein umbenanntes
+  Werkzeug fällt sofort auf, statt erst beim Setup.
 
 ---
 
