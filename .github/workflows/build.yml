@@ -90,9 +90,11 @@ jobs:
             dist/MHD Lock Tool.exe
           if-no-files-found: error
 
-      # A tag turns the build into a public download that never expires.
+      # Publishes the installer as a permanent, login-free download.
+      # Runs for a pushed tag, or on demand via "Run workflow" - in the latter
+      # case gh creates the tag v<version> at the built commit itself.
       - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -101,11 +103,16 @@ jobs:
           set -euo pipefail
           SETUP="dist/DME-Innovation-Tools-Setup-${VERSION}.exe"
           test -f "$SETUP"
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" "$SETUP" --clobber
+          case "${GITHUB_REF}" in
+            refs/tags/*) TAG="${GITHUB_REF_NAME}" ;;
+            *)           TAG="v${VERSION}" ;;
+          esac
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$SETUP" --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" "$SETUP" \
+            gh release create "$TAG" "$SETUP" \
+              --target "${GITHUB_SHA}" \
               --title "DME Innovation Tools ${VERSION}" \
               --notes-file installer/RELEASE_NOTES.md
           fi
-          echo "Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+          echo "Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
