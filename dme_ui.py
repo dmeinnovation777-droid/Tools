@@ -66,6 +66,35 @@ _MONO_CANDIDATES = ["Cascadia Mono", "Consolas", "JetBrains Mono", "SF Mono",
 
 FONTS: dict[str, tuple] = {}
 
+# Pixels per logical unit. 1.0 on a normal display, 1.5 at 150 % Windows scaling.
+SCALE = 1.0
+
+
+def enable_dpi_awareness() -> None:
+    """
+    Tell Windows we paint at the real pixel grid.
+
+    Without this a tkinter window is rendered at 96 dpi and then bitmap-stretched
+    by the compositor - which is exactly what makes the app look washed out on
+    any display running above 100 %. Must be called before the first Tk window.
+    """
+    if os.name != "nt":
+        return
+    import ctypes
+    for attempt in (lambda: ctypes.windll.shcore.SetProcessDpiAwareness(2),   # per monitor
+                    lambda: ctypes.windll.shcore.SetProcessDpiAwareness(1),   # system
+                    lambda: ctypes.windll.user32.SetProcessDPIAware()):
+        try:
+            attempt()
+            return
+        except Exception:
+            continue
+
+
+def px(value: float) -> int:
+    """Scale a pixel dimension to the current display."""
+    return max(1, int(round(value * SCALE)))
+
 
 def _pick(root, candidates, fallback):
     available = {name.lower() for name in tkfont.families(root)}
@@ -76,7 +105,19 @@ def _pick(root, candidates, fallback):
 
 
 def init(root) -> None:
-    """Resolve fonts and install ttk styles. Call once, right after Tk()."""
+    """Resolve the display scale, fonts and ttk styles. Call once, right after Tk()."""
+    global SCALE
+    try:
+        dpi = float(root.winfo_fpixels("1i"))
+    except tk.TclError:
+        dpi = 96.0
+    SCALE = min(max(dpi / 96.0, 1.0), 3.0)
+    try:
+        # point-sized fonts now render at their true physical size, sharp
+        root.tk.call("tk", "scaling", dpi / 72.0)
+    except tk.TclError:
+        pass
+
     ui = _pick(root, _UI_CANDIDATES, "TkDefaultFont")
     mono = _pick(root, _MONO_CANDIDATES, "TkFixedFont")
     FONTS.update({
@@ -114,7 +155,7 @@ def _install_ttk(root):
             ("Vertical.Scrollbar.thumb", {"expand": 1, "sticky": "nswe"})]})])
     style.configure("DME.Vertical.TScrollbar", troughcolor=BG, bordercolor=BG,
                     background=BORDER, darkcolor=BORDER, lightcolor=BORDER,
-                    relief="flat", width=10)
+                    relief="flat", width=px(10))
     style.map("DME.Vertical.TScrollbar",
               background=[("active", BORDER_SOFT), ("pressed", TEXT_FAINT)])
     style.layout("DME.Horizontal.TScrollbar", [
@@ -122,12 +163,12 @@ def _install_ttk(root):
             ("Horizontal.Scrollbar.thumb", {"expand": 1, "sticky": "nswe"})]})])
     style.configure("DME.Horizontal.TScrollbar", troughcolor=BG, bordercolor=BG,
                     background=BORDER, darkcolor=BORDER, lightcolor=BORDER,
-                    relief="flat", height=10)
+                    relief="flat", height=px(10))
     style.configure("DME.Treeview", background=CARD, fieldbackground=CARD,
                     foreground=TEXT, bordercolor=BORDER, borderwidth=0,
-                    relief="flat", rowheight=27, font=f("small"))
+                    relief="flat", rowheight=px(27), font=f("small"))
     style.configure("DME.Treeview.Heading", background=CARD_ALT, foreground=TEXT_FAINT,
-                    relief="flat", borderwidth=0, font=f("micro"), padding=(8, 6))
+                    relief="flat", borderwidth=0, font=f("micro"), padding=(px(8), px(6)))
     style.map("DME.Treeview.Heading", background=[("active", HOVER)])
     style.map("DME.Treeview", background=[("selected", BORDER)],
               foreground=[("selected", TEXT)])
@@ -181,48 +222,6 @@ def reveal_in_file_manager(path: str) -> None:
         pass
 
 
-class ToolTip:
-    """Lightweight dark tooltip."""
-
-    def __init__(self, widget, text, delay=450):
-        self.widget = widget
-        self.text = text
-        self.delay = delay
-        self._after = None
-        self._tip = None
-        widget.bind("<Enter>", self._schedule, add="+")
-        widget.bind("<Leave>", self._hide, add="+")
-        widget.bind("<ButtonPress>", self._hide, add="+")
-
-    def _schedule(self, _=None):
-        self._cancel()
-        self._after = self.widget.after(self.delay, self._show)
-
-    def _cancel(self):
-        if self._after:
-            self.widget.after_cancel(self._after)
-            self._after = None
-
-    def _show(self):
-        if self._tip or not self.text:
-            return
-        x = self.widget.winfo_rootx() + 14
-        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
-        self._tip = tk.Toplevel(self.widget)
-        self._tip.wm_overrideredirect(True)
-        self._tip.wm_geometry(f"+{x}+{y}")
-        wrap = tk.Frame(self._tip, bg=BORDER)
-        wrap.pack()
-        tk.Label(wrap, text=self.text, bg=CARD_ALT, fg=TEXT_DIM, font=f("small"),
-                 justify="left", wraplength=320, padx=10, pady=6).pack(padx=1, pady=1)
-
-    def _hide(self, _=None):
-        self._cancel()
-        if self._tip:
-            self._tip.destroy()
-            self._tip = None
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Buttons
 # ─────────────────────────────────────────────────────────────────────────────
@@ -248,7 +247,8 @@ def button(parent, text, command=None, variant="primary", size="md", bg=None, **
                     bg=base_bg, fg=spec["fg"],
                     activebackground=spec["press"], activeforeground=spec["fg"],
                     disabledforeground=TEXT_FAINT,
-                    font=f(dims["font"]), padx=dims["padx"], pady=dims["pady"], **kw)
+                    font=f(dims["font"]), padx=px(dims["padx"]), pady=px(dims["pady"]),
+                    **kw)
     on_hover(btn, base_bg, spec["hover"])
     return btn
 
@@ -258,7 +258,7 @@ def icon_button(parent, text, command=None, bg=CARD, fg=TEXT_FAINT, hover_fg=ERR
     btn = tk.Button(parent, text=text, command=command, relief="flat", bd=0,
                     highlightthickness=0, cursor="hand2", bg=bg, fg=fg,
                     activebackground=hover_bg or HOVER, activeforeground=hover_fg,
-                    font=f(font_key), padx=6, pady=1)
+                    font=f(font_key), padx=px(6), pady=px(1))
     on_hover(btn, bg, hover_bg or HOVER, fg_normal=fg, fg_active=hover_fg)
     return btn
 
@@ -283,24 +283,22 @@ def field_label(parent, text, bg=CARD, fg=TEXT_DIM):
 
 
 class PathRow(tk.Frame):
-    """Label + path entry + Browse button, stacked the modern way."""
+    """Label + path entry + Browse button, with a visible hint line below."""
 
     def __init__(self, parent, label, variable, on_browse, browse_text="Browse",
-                 hint=None, bg=CARD, tooltip=None):
+                 hint=None, bg=CARD):
         super().__init__(parent, bg=bg)
         field_label(self, label, bg=bg).pack(fill=tk.X, pady=(0, 4))
         row = tk.Frame(self, bg=bg)
         row.pack(fill=tk.X)
         self.entry = entry(row, variable)
-        self.entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6)
+        self.entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=px(6))
         self.button = button(row, browse_text, on_browse, variant="secondary", size="md")
-        self.button.pack(side=tk.LEFT, padx=(8, 0))
+        self.button.pack(side=tk.LEFT, padx=(px(8), 0))
         self.hint_var = tk.StringVar(value=hint or "")
         self.hint = tk.Label(self, textvariable=self.hint_var, bg=bg, fg=TEXT_FAINT,
                              font=f("small"), anchor="w")
-        self.hint.pack(fill=tk.X, pady=(5, 0))
-        if tooltip:
-            ToolTip(self.entry, tooltip)
+        self.hint.pack(fill=tk.X, pady=(px(5), 0))
 
     def set_hint(self, text, tone="idle"):
         self.hint_var.set(text)
@@ -310,14 +308,11 @@ class PathRow(tk.Frame):
 class LabeledEntry(tk.Frame):
     """Compact label-above-field cell for form grids."""
 
-    def __init__(self, parent, label, variable, bg=CARD, mono=True, width=None,
-                 placeholder=None):
+    def __init__(self, parent, label, variable, bg=CARD, mono=True, width=None):
         super().__init__(parent, bg=bg)
-        field_label(self, label, bg=bg).pack(fill=tk.X, pady=(0, 3))
+        field_label(self, label, bg=bg).pack(fill=tk.X, pady=(0, px(3)))
         self.entry = entry(self, variable, mono=mono, width=width)
-        self.entry.pack(fill=tk.X, ipady=5)
-        if placeholder:
-            ToolTip(self.entry, placeholder)
+        self.entry.pack(fill=tk.X, ipady=px(5))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -329,18 +324,18 @@ class Card(tk.Frame):
     def __init__(self, parent, title=None, hint=None, bg=CARD, pad=(16, 14)):
         super().__init__(parent, bg=bg, highlightbackground=BORDER,
                          highlightthickness=1, bd=0)
-        px, py = pad
+        px_, py = px(pad[0]), px(pad[1])
         self.hint_var = tk.StringVar(value=hint or "")
         if title:
             head = tk.Frame(self, bg=bg)
-            head.pack(fill=tk.X, padx=px, pady=(py - 2, 0))
+            head.pack(fill=tk.X, padx=px_, pady=(py - 2, 0))
             tk.Label(head, text=title, bg=bg, fg=TEXT, font=f("h2"),
                      anchor="w").pack(side=tk.LEFT)
             self.hint_label = tk.Label(head, textvariable=self.hint_var, bg=bg,
                                        fg=TEXT_FAINT, font=f("small"), anchor="e")
             self.hint_label.pack(side=tk.RIGHT)
         self.body = tk.Frame(self, bg=bg)
-        self.body.pack(fill=tk.BOTH, expand=True, padx=px, pady=(10, py))
+        self.body.pack(fill=tk.BOTH, expand=True, padx=px_, pady=(px(10), py))
 
     def set_hint(self, text, tone="idle"):
         self.hint_var.set(text)
@@ -358,14 +353,14 @@ class TabBar(tk.Frame):
         self._underlines = {}
         self._active = None
         strip = tk.Frame(self, bg=bg)
-        strip.pack(fill=tk.X, padx=22)
+        strip.pack(fill=tk.X, padx=px(22))
         for key, label in tabs:
             holder = tk.Frame(strip, bg=bg)
             holder.pack(side=tk.LEFT)
             btn = tk.Label(holder, text=label, bg=bg, fg=TEXT_DIM, font=f("tab"),
-                           padx=4, pady=11, cursor="hand2")
+                           padx=px(4), pady=px(11), cursor="hand2")
             btn.pack()
-            underline = tk.Frame(holder, bg=bg, height=2)
+            underline = tk.Frame(holder, bg=bg, height=px(2))
             underline.pack(fill=tk.X)
             btn.bind("<Button-1>", lambda _e, k=key: self.select(k))
             btn.bind("<Enter>", lambda _e, b=btn, k=key:
@@ -374,7 +369,7 @@ class TabBar(tk.Frame):
                      b.configure(fg=TEXT_DIM) if self._active != k else None)
             self._buttons[key] = btn
             self._underlines[key] = underline
-            tk.Frame(strip, bg=bg, width=22).pack(side=tk.LEFT)
+            tk.Frame(strip, bg=bg, width=px(22)).pack(side=tk.LEFT)
         hr(self, bg=BORDER_SOFT)
 
     def select(self, key):
@@ -395,16 +390,16 @@ class Banner(tk.Frame):
         super().__init__(parent, bg=bg)
         self._outer_bg = bg
         self._wrap = tk.Frame(self, bg=OK_BG)
-        self._bar = tk.Frame(self._wrap, bg=OK, width=3)
+        self._bar = tk.Frame(self._wrap, bg=OK, width=px(3))
         self._bar.pack(side=tk.LEFT, fill=tk.Y)
         inner = tk.Frame(self._wrap, bg=OK_BG)
         inner.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self._inner = inner
         self._icon = tk.Label(inner, text="", bg=OK_BG, fg=OK, font=f("h2"))
-        self._icon.pack(side=tk.LEFT, padx=(12, 8), pady=10)
+        self._icon.pack(side=tk.LEFT, padx=(px(12), px(8)), pady=px(10))
         self._text = tk.Label(inner, text="", bg=OK_BG, fg=TEXT, font=f("small"),
                               anchor="w", justify="left", wraplength=560)
-        self._text.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=10)
+        self._text.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=px(10))
         self._action = button(inner, "", None, variant="ghost", size="sm", bg=OK_BG)
         self._close = icon_button(inner, "✕", self.hide, bg=OK_BG, fg=TEXT_FAINT,
                                   hover_fg=TEXT, hover_bg=OK_BG)
@@ -442,18 +437,18 @@ class StatusBar(tk.Frame):
     """Bottom bar: state dot + message on the left, product signature right."""
 
     def __init__(self, parent, signature=""):
-        super().__init__(parent, bg=SURFACE, height=30)
+        super().__init__(parent, bg=SURFACE, height=px(30))
         self.pack_propagate(False)
         hr(self, bg=BORDER_SOFT)
         row = tk.Frame(self, bg=SURFACE)
         row.pack(fill=tk.BOTH, expand=True)
         self._dot = tk.Label(row, text="●", bg=SURFACE, fg=TEXT_FAINT, font=f("micro"))
-        self._dot.pack(side=tk.LEFT, padx=(14, 6))
+        self._dot.pack(side=tk.LEFT, padx=(px(14), px(6)))
         self._var = tk.StringVar(value="Ready")
         tk.Label(row, textvariable=self._var, bg=SURFACE, fg=TEXT_DIM,
                  font=f("small"), anchor="w").pack(side=tk.LEFT)
         tk.Label(row, text=signature, bg=SURFACE, fg=TEXT_FAINT,
-                 font=f("small"), anchor="e").pack(side=tk.RIGHT, padx=14)
+                 font=f("small"), anchor="e").pack(side=tk.RIGHT, padx=px(14))
 
     def set(self, text, tone="idle"):
         self._var.set(text)
@@ -466,13 +461,13 @@ class Header(tk.Frame):
 
     def __init__(self, parent, brand, product, version, tagline=""):
         super().__init__(parent, bg=SURFACE)
-        row = tk.Frame(self, bg=SURFACE, height=62)
+        row = tk.Frame(self, bg=SURFACE, height=px(62))
         row.pack(fill=tk.X)
         row.pack_propagate(False)
 
-        logo = brand.header_logo(row, subsample=2)
+        logo = brand.header_logo(row, scale=SCALE)
         if logo is not None:
-            logo.pack(side=tk.LEFT, padx=(20, 16))
+            logo.pack(side=tk.LEFT, padx=(px(20), px(16)))
         else:
             tk.Label(row, text=brand.VENDOR.upper(), bg=SURFACE, fg=TEXT,
                      font=f("title")).pack(side=tk.LEFT, padx=(20, 16))
@@ -496,7 +491,7 @@ class Header(tk.Frame):
         self.right = tk.Frame(row, bg=SURFACE)
         self.right.pack(side=tk.RIGHT, padx=20)
 
-        tk.Frame(self, bg=ACCENT, height=2).pack(fill=tk.X)
+        tk.Frame(self, bg=ACCENT, height=px(2)).pack(fill=tk.X)
 
 
 class VScroll(tk.Frame):
@@ -568,7 +563,7 @@ class LogView(tk.Frame):
 
         self.text = tk.Text(holder, bg=bg, fg=TEXT_DIM, font=f("mono"), height=height,
                             relief="flat", bd=0, highlightthickness=0, wrap="none",
-                            padx=12, pady=10, insertbackground=ACCENT,
+                            padx=px(12), pady=px(10), insertbackground=ACCENT,
                             selectbackground=BORDER, state="disabled")
         self.vbar = ttk.Scrollbar(holder, orient="vertical",
                                   style="DME.Vertical.TScrollbar", command=self.text.yview)
@@ -673,6 +668,7 @@ class Page(tk.Frame):
 
     def __init__(self, parent, bg=BG, pad=22):
         super().__init__(parent, bg=bg)
+        pad = px(pad)
         self.action = tk.Frame(self, bg=SURFACE)
         self.action.pack(side=tk.BOTTOM, fill=tk.X)
         tk.Frame(self.action, bg=BORDER_SOFT, height=1).pack(fill=tk.X)

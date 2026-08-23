@@ -260,7 +260,6 @@ class PartRow:
         self.human_lbl = tk.Label(table, text="", bg=bg, fg=ui.TEXT_DIM,
                                   font=ui.f("small"), width=9, anchor="e")
         self.del_btn = ui.icon_button(table, "✕", on_delete, bg=bg)
-        ui.ToolTip(self.del_btn, "Remove this part")
 
         self.size_var.trace_add('write', self._changed)
         self.name_var.trace_add('write', self._changed)
@@ -313,8 +312,8 @@ class AutoTunerTool(_TkBase):
         super().__init__()
         self.title(f"{APP_NAME} — {brand.VENDOR}")
         self.configure(bg=ui.BG)
-        self.minsize(900, 680)
         ui.init(self)
+        self.minsize(ui.px(900), ui.px(680))
         brand.apply_window_icon(self)
 
         self._archive_info: dict | None = None
@@ -373,8 +372,7 @@ class AutoTunerTool(_TkBase):
         self._z2b_zip_var = tk.StringVar()
         self._z2b_path = ui.PathRow(src.body, "AutoTuner backup (.zip / .bak)",
                                     self._z2b_zip_var, self._browse_zip,
-                                    hint="No file selected — Ctrl+O to browse",
-                                    tooltip="Select the AutoTuner ECU backup .zip or .bak file")
+                                    hint="No file selected — Ctrl+O to browse")
         self._z2b_path.pack(fill=tk.X)
         self._z2b_zip_var.trace_add('write', lambda *_: self._on_zip_path_changed())
 
@@ -394,8 +392,7 @@ class AutoTunerTool(_TkBase):
         self._z2b_out_var = tk.StringVar()
         self._z2b_out_path = ui.PathRow(out.body, "Combined binary (.bin)",
                                         self._z2b_out_var, self._browse_zip_output,
-                                        browse_text="Save as…",
-                                        tooltip="Choose where to save the combined .bin")
+                                        browse_text="Save as…")
         self._z2b_out_path.pack(fill=tk.X)
 
         self._z2b_summary = tk.StringVar(value="Waiting for a backup file")
@@ -408,7 +405,6 @@ class AutoTunerTool(_TkBase):
         page.summary(summary_var)
         btn = ui.button(page.action_row, label, command, variant="primary", size="lg")
         btn.pack(side=tk.RIGHT)
-        ui.ToolTip(btn, "Ctrl + Enter")
         return btn
 
     def _on_zip_path_changed(self):
@@ -537,8 +533,7 @@ class AutoTunerTool(_TkBase):
         self._b2z_bin_var = tk.StringVar()
         self._b2z_path = ui.PathRow(src.body, "Modified binary (.bin)", self._b2z_bin_var,
                                     self._browse_bin,
-                                    hint="No file selected — Ctrl+O to browse",
-                                    tooltip="Select the combined .bin file to split")
+                                    hint="No file selected — Ctrl+O to browse")
         self._b2z_path.pack(fill=tk.X)
         self._b2z_bin_var.trace_add('write', lambda *_: self._on_bin_path_changed())
 
@@ -599,7 +594,7 @@ class AutoTunerTool(_TkBase):
         for i, (key, label, placeholder) in enumerate(META_FIELDS):
             var = tk.StringVar()
             self._meta_vars[key] = var
-            cell = ui.LabeledEntry(grid, label, var, placeholder=placeholder)
+            cell = ui.LabeledEntry(grid, f"{label} ({placeholder})", var)
             cell.grid(row=i // 3, column=i % 3, sticky="ew",
                       padx=(0 if i % 3 == 0 else 12, 0), pady=(0, 10))
         for col in range(3):
@@ -609,8 +604,7 @@ class AutoTunerTool(_TkBase):
         self._b2z_out_var = tk.StringVar()
         self._b2z_out_path = ui.PathRow(out.body, "AutoTuner backup (.zip)",
                                         self._b2z_out_var, self._browse_zip_out,
-                                        browse_text="Save as…",
-                                        tooltip="Choose where to save the AutoTuner .zip")
+                                        browse_text="Save as…")
         self._b2z_out_path.pack(fill=tk.X)
 
         self._b2z_summary = tk.StringVar(value="Waiting for a .bin file")
@@ -821,8 +815,9 @@ def main() -> int:
         print("Windows/macOS: reinstall Python and tick 'tcl/tk and IDLE'.", file=sys.stderr)
         print("Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)
         return 1
+    ui.enable_dpi_awareness()
     app = AutoTunerTool()
-    app.geometry("980x780")
+    app.geometry(f"{ui.px(980)}x{ui.px(780)}")
     app.mainloop()
     return 0
 

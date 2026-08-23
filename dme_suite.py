@@ -100,9 +100,9 @@ class SuiteLauncher(_TkBase):
         super().__init__()
         self.title(APP_NAME)
         self.configure(bg=ui.BG)
-        self.minsize(820, 520)
-        self.resizable(True, False)
         ui.init(self)
+        self.minsize(ui.px(820), ui.px(520))
+        self.resizable(True, False)
         brand.apply_window_icon(self)
         self._build()
 
@@ -178,8 +178,9 @@ def main() -> int:
         print("Windows/macOS: reinstall Python and tick 'tcl/tk and IDLE'.", file=sys.stderr)
         print("Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)
         return 1
+    ui.enable_dpi_awareness()
     app = SuiteLauncher()
-    app.geometry("880x560")
+    app.geometry(f"{ui.px(880)}x{ui.px(560)}")
     app.mainloop()
     return 0
 

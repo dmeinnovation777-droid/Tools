@@ -1101,8 +1101,8 @@ class MhdLockTool(_TkBase):
         super().__init__()
         self.title(f"{APP_NAME} — {brand.VENDOR}")
         self.configure(bg=ui.BG)
-        self.minsize(960, 700)
         ui.init(self)
+        self.minsize(ui.px(960), ui.px(700))
         brand.apply_window_icon(self)
 
         self.config_data = load_config()
@@ -1308,9 +1308,11 @@ class MhdLockTool(_TkBase):
                                    ok=bool(path) and os.path.isfile(path))
 
         missing = [k for k in ("stock", "xdf", "toolkey")
-                   if not getattr(self, f"var_{key}" if False else f"var_{k}").get().strip()]
-        if missing or found.notes:
-            self.manual.expand()
+                   if not getattr(self, f"var_{k}").get().strip()]
+        if missing:
+            self.manual.set_title(f"Change manually — {len(missing)} file(s) not found")
+        else:
+            self.manual.set_title("Change manually")
         for note in found.notes:
             self.log.write(f" ! {note}", "warn")
 
@@ -1399,7 +1401,6 @@ class MhdLockTool(_TkBase):
             self.status.set("Ready to lock", "ok")
         else:
             self.details.set_title(f"Details and builder log — {len(report.errors)} problem(s)")
-            self.details.expand()
             self.var_summary.set(report.errors[0].text if report.errors else "Checks failed")
             self.status.set("Check failed", "error")
         return report
@@ -1487,7 +1488,7 @@ class MhdLockTool(_TkBase):
         ui.PathRow(builder.body, "Path to the builder executable", self.var_exe,
                    lambda: self._pick_file(self.var_exe, "Select the MHD map builder",
                                            [("Programs", "*.exe"), ("All files", "*.*")]),
-                   tooltip="e.g. TuningMapBuilder-v6.exe").pack(fill=tk.X, pady=(0, 12))
+                   ).pack(fill=tk.X, pady=(0, 12))
         opts = tk.Frame(builder.body, bg=ui.CARD)
         opts.pack(fill=tk.X)
         self.var_args = tk.StringVar()
@@ -1513,8 +1514,8 @@ class MhdLockTool(_TkBase):
                    lambda: self._pick_file(self.var_cfg_toolkey, "Select your .toolkey",
                                            [("MHD tool key", "*.toolkey"),
                                             ("All files", "*.*")]),
-                   tooltip="Stays on this machine - it is only copied into the "
-                           "temporary working folder").pack(fill=tk.X, pady=(0, 12))
+                   hint="Stays on this machine — only copied into the temporary "
+                        "working folder").pack(fill=tk.X, pady=(0, 12))
         self.var_library = tk.StringVar()
         ui.PathRow(yours.body, "Folder with your XDFs and stock ROMs (optional)",
                    self.var_library,
@@ -1532,8 +1533,7 @@ class MhdLockTool(_TkBase):
                    lambda: self._pick_dir(self.var_cfg_outdir, "Select the default output folder"),
                    browse_text="Choose…").pack(fill=tk.X, pady=(0, 12))
         self.var_template = tk.StringVar()
-        ui.LabeledEntry(output.body, "File name template", self.var_template,
-                        placeholder=NAME_TOKENS).pack(fill=tk.X)
+        ui.LabeledEntry(output.body, "File name template", self.var_template).pack(fill=tk.X)
         tk.Label(output.body, text=f"Tokens: {NAME_TOKENS}   ·   "
                                    "{source} keeps the name the builder produced",
                  bg=ui.CARD, fg=ui.TEXT_FAINT, font=ui.f("small"),
@@ -2068,8 +2068,9 @@ def main() -> int:
         print("Windows/macOS: reinstall Python and tick 'tcl/tk and IDLE'.", file=sys.stderr)
         print("Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)
         return 1
+    ui.enable_dpi_awareness()
     app = MhdLockTool()
-    app.geometry("1040x820")
+    app.geometry(f"{ui.px(1040)}x{ui.px(820)}")
     app.mainloop()
     return 0
 

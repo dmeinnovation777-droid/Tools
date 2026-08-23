@@ -46,8 +46,10 @@ OFF_WHITE = (233, 236, 241)   # dme_ui.TEXT
 # Icon sizes baked into the multi-resolution .ico
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 
-# Header logo: rendered at 2x and displayed via PhotoImage.subsample(2, 2)
-HEADER_HEIGHT_2X = 80
+# Header wordmark, rendered at the exact heights the app uses at 100 %, 150 %
+# and 200 % display scaling. Tk can only scale bitmaps by whole factors, so the
+# app picks a ready-made size instead of resampling anything.
+HEADER_HEIGHTS = (40, 60, 80)
 
 
 def render_master(dpi: int = 600) -> Image.Image:
@@ -184,21 +186,22 @@ def main() -> int:
     (ASSETS / "dme-icon.ico").write_bytes(ico_data)
 
     # ── Embedded blobs (keep autotuner_tool.py self-contained) ──────────────
-    header_logo = recolour(scale_to_height(master, HEADER_HEIGHT_2X), OFF_WHITE)
-    header_plate = Image.new("RGBA", header_logo.size, HEADER_BG + (255,))
-    header_plate.alpha_composite(header_logo)
-
     blobs = {
         "ICON_ICO_B64": ico_data,
         "ICON_PNG_B64": png_bytes(make_icon(dme, 64)),
-        "LOGO_HEADER_B64": png_bytes(header_plate.convert("RGB")),
         "LOGO_WHITE_B64": png_bytes(recolour(scale_to_height(master, 128), OFF_WHITE)),
     }
+    header_sizes = []
+    for height in HEADER_HEIGHTS:
+        wordmark = recolour(scale_to_height(master, height), OFF_WHITE)
+        plate = Image.new("RGBA", wordmark.size, HEADER_BG + (255,))
+        plate.alpha_composite(wordmark)
+        blobs[f"LOGO_HEADER_{height}_B64"] = png_bytes(plate.convert("RGB"))
+        header_sizes.append(f"{plate.width}x{plate.height}")
 
     for path in sorted(ASSETS.glob("dme-*")):
         print(f"  {path.relative_to(ROOT)}  ({path.stat().st_size:,} bytes)")
-    print(f"  header logo: {header_plate.size[0]}x{header_plate.size[1]} px "
-          f"({len(blobs['LOGO_HEADER_B64']):,} bytes embedded)")
+    print(f"  header wordmark: {', '.join(header_sizes)} px")
 
     if BRAND_PY.exists():
         changed = patch_source(blobs, check_only=args.check)

@@ -19,7 +19,10 @@
 | **MHD Lock Tool** | Locken von MHD+ Tune-Files: getunte Datei wählen, VIN eintippen, fertig — Stock-ROM, XDF und Tool-Key findet die App selbst |
 
 Beide laufen mit der Python-Standardbibliothek (nur `tkinter` für die
-Oberfläche) — keine Fremdpakete zur Laufzeit.
+Oberfläche) — keine Fremdpakete zur Laufzeit. Die Darstellung ist
+DPI-bewusst: auf Bildschirmen mit 125 %, 150 % oder 200 % Skalierung wird
+scharf gezeichnet statt hochgerechnet, und das Logo liegt in den passenden
+Größen bereit.
 
 ---
 
@@ -43,7 +46,7 @@ Oberfläche) — keine Fremdpakete zur Laufzeit.
 unter *Assets*:
 
 ```
-DME-Innovation-Tools-Setup-1.1.0.exe
+DME-Innovation-Tools-Setup-1.2.0.exe
 ```
 
 Windows zeigt bei unsignierten Setups „Der Computer wurde durch Windows
@@ -292,7 +295,7 @@ build_exe.bat           :: nur die drei .exe, ohne Setup
 (`winget install JRSoftware.InnoSetup`). Ergebnis:
 
 ```
-dist\DME-Innovation-Tools-Setup-1.1.0.exe
+dist\DME-Innovation-Tools-Setup-1.2.0.exe
 dist\DME Innovation Tools.exe
 dist\AutoTuner Backup Tool.exe
 dist\MHD Lock Tool.exe
@@ -344,6 +347,17 @@ Produktname und Version stehen oben in `dme_brand.py`, die Akzentfarbe und die
 komplette Palette oben in `dme_ui.py`.
 
 ---
+
+## Bedienphilosophie
+
+Zwei Regeln, an die sich beide Programme halten:
+
+- **Keine Fenster ohne Anlass.** Keine Tooltips, die beim Überfahren aufspringen,
+  keine Bestätigungsdialoge für Routine, keine Bereiche, die sich von selbst
+  aufklappen. Rückmeldung erscheint dort, wo gearbeitet wird — in der Zeile über
+  dem Knopf und im farbigen Streifen darüber.
+- **Nur fragen, was die App nicht selbst weiß.** Alles, was aus einer Datei
+  hervorgeht, wird abgeleitet und mit Häkchen und Quelle angezeigt.
 
 ## Tests
 
