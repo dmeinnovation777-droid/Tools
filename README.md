@@ -1,0 +1,284 @@
+<p align="center">
+  <img src="assets/dme-logo-white.png#gh-dark-mode-only" width="320" alt="DME Innovation">
+  <img src="assets/dme-logo-black.png#gh-light-mode-only" width="320" alt="DME Innovation">
+</p>
+
+# DME Innovation — Tuning Tools
+
+Zwei Windows-Werkzeuge für die tägliche Arbeit am Steuergerät, im gleichen
+Look und auf einer gemeinsamen Code-Basis:
+
+| Tool | Zweck |
+| --- | --- |
+| **AutoTuner Backup Tool** | AutoTuner-Backups (`.zip`/`.bak`) zu einer durchgehenden `.bin` zusammenführen und wieder zurück verpacken |
+| **MHD Lock Tool** | Das Locken von MHD+ Tune-Files automatisieren: Vorprüfung, sauberes Arbeitsverzeichnis, Lauf des MHD-Tools, Ablage der `.mhd` |
+
+Beide laufen mit der Python-Standardbibliothek (nur `tkinter` für die
+Oberfläche) — keine Fremdpakete zur Laufzeit.
+
+---
+
+## Inhalt
+
+- [Schnellstart](#schnellstart)
+- [AutoTuner Backup Tool](#autotuner-backup-tool)
+- [MHD Lock Tool](#mhd-lock-tool)
+- [Windows-.exe bauen](#windows-exe-bauen)
+- [Projektstruktur](#projektstruktur)
+- [Branding anpassen](#branding-anpassen)
+- [Tests](#tests)
+- [Wichtige Hinweise](#wichtige-hinweise)
+
+---
+
+## Schnellstart
+
+```bat
+:: Python 3.10 oder neuer, bei der Installation "tcl/tk and IDLE" anhaken
+python autotuner_tool.py
+python mhd_lock_tool.py
+```
+
+Auf Linux zusätzlich `sudo apt install python3-tk`.
+
+Fertige `.exe` ohne Python: siehe [Windows-.exe bauen](#windows-exe-bauen).
+
+---
+
+## AutoTuner Backup Tool
+
+![AutoTuner Backup Tool — ZIP zu BIN](docs/screenshot-autotuner-zip-to-bin.png)
+
+### ZIP → BIN
+
+1. AutoTuner-Backup (`.zip` oder `.bak`) auswählen — der Inhalt wird sofort
+   analysiert.
+2. Die Vorschau zeigt jeden Speicherbereich mit Größe und **Offset in exakt der
+   Reihenfolge, in der er in die `.bin` geschrieben wird**, dazu Fahrzeug- und
+   Steuergerätedaten aus der `contents.ini`.
+3. Zielpfad wählen und **Concentrate to .bin** — alle Teile werden
+   aneinandergehängt.
+
+### BIN → ZIP
+
+![AutoTuner Backup Tool — BIN zu ZIP](docs/screenshot-autotuner-bin-to-zip.png)
+
+1. Geänderte `.bin` auswählen. Passt die Dateigröße zu einem bekannten Layout,
+   wird das Preset automatisch gesetzt.
+2. Aufteilung festlegen — per **Load from ZIP template** aus einem
+   Original-Backup, per Preset (MED17.1.1, MED17.5.x, MEVD17.2.x) oder von Hand.
+   Der Balken zeigt die Aufteilung, die Anzeige daneben meldet sofort
+   Überhang oder fehlende Bytes.
+3. Optional Fahrzeug-/ECU-Daten eintragen (landen in der `contents.ini`).
+4. **Split & package to .zip** — erzeugt ein AutoTuner-kompatibles Archiv:
+
+```
+iflash0.bin           internes Flash, Bank 0
+iflash1.bin           internes Flash, Bank 1
+dflash0.bin           Daten-Flash, Bank 0
+dflash1.bin           Daten-Flash, Bank 1
+contents.ini          Fahrzeug-/ECU-Metadaten
+how-to-use-backup.html
+```
+
+Die Teile liegen direkt im Archivwurzelverzeichnis (nicht in einem Unterordner) —
+`contents.ini` und `how-to-use-backup.html` sind byteweise im Originalformat.
+
+### Tastenkürzel
+
+| Taste | Funktion |
+| --- | --- |
+| `Ctrl` + `O` | Datei auswählen |
+| `F5` | Archiv neu analysieren |
+| `Ctrl` + `Enter` | Aktion des aktiven Tabs ausführen |
+
+---
+
+## MHD Lock Tool
+
+![MHD Lock Tool](docs/screenshot-mhd-lock-lock.png)
+
+### Was es macht — und was nicht
+
+Das Tool **automatisiert den Ablauf rund um das offizielle MHD Map Encryption
+Tool** (TuningMapBuilder / XDF_Tools), so wie ihn der MHD+ Tuning Guide
+beschreibt. Es verschlüsselt nichts selbst, ersetzt nichts und umgeht nichts —
+das Locken erledigt weiterhin deine eigene lizenzierte MHD-Exe, die du unter
+**Settings** einträgst. Die Exe ist absichtlich nicht Teil dieses Repos.
+
+Der Handbetrieb scheitert fast immer an denselben Kleinigkeiten: zwei XDFs im
+Ordner, eine vergessene `_vin.txt`, eine falsch benannte Stock-Datei, eine
+zweite `.toolkey`, eine Datei ohne Änderungen. Genau das fängt dieses Tool ab.
+
+### Ablauf
+
+1. **Kunde & VIN** eintragen — die VIN wird live geprüft (17 Zeichen, ohne
+   I/O/Q).
+2. **Dateien** wählen: Stock-ROM, getunte ROM, XDF, `.toolkey`.
+3. **Pre-flight** läuft automatisch bei jeder Änderung und meldet:
+   - fehlende oder doppelte Eingaben, falsche VIN, nicht vorhandener Ausgabeordner
+   - unterschiedliche Dateigrößen von Stock und Tune
+   - identische Dateien (der Builder würde `NO modifications found` melden)
+   - **alle geänderten Regionen** mit Offset, Länge und den betroffenen
+     XDF-Tabellen
+   - Änderungen, die diese XDF nicht beschreibt (rein informativ — der Builder
+     bringt eigene Tabellendefinitionen mit)
+   - abweichende Software-IDs zwischen Stock und Tune
+4. **Lock now** — das Tool legt ein sauberes Arbeitsverzeichnis an, startet den
+   Builder darin, zeigt dessen Ausgabe live und farbig, holt die erzeugte
+   `.mhd` ab, benennt sie nach Vorlage und legt ein `.log` mit Prüfergebnis und
+   Builder-Ausgabe daneben.
+
+**Prepare folder only** baut nur das Arbeitsverzeichnis — falls du den Builder
+lieber selbst startest.
+
+### Arbeitsverzeichnis
+
+Für jeden Job wird ein eigener, temporärer Ordner gebaut, der exakt einem
+handgebauten entspricht:
+
+```
+00005C6414C808.xdf                  die XDF (genau eine)
+00005C6414C808_original.bin         Stock-ROM, immer auf _original.bin normiert
+MAP1 E45 MAP2 E30 v4.bin            die getunte Datei (Originalname bleibt)
+DMETEST0000000001_vin.txt           leer — die VIN steckt im Dateinamen
+Gen.toolkey                         dein MHD-Schlüssel
+TuningMapBuilder-v6.exe             Kopie des Builders, wird dort ausgeführt
+```
+
+Danach wird der Ordner wieder entfernt (abschaltbar unter **Advanced**).
+
+### Batch
+
+![MHD Lock Tool — Batch](docs/screenshot-mhd-lock-batch.png)
+
+Mehrere Kunden in einem Durchgang. Jeder Job bekommt sein eigenes
+Arbeitsverzeichnis — eine kaputte Datei kann keinen anderen Kunden beeinflussen.
+
+- **Add tuned files…** übernimmt Stock-ROM, XDF, `.toolkey` und VIN aus dem
+  Lock-Tab.
+- **Import CSV…** liest eine Liste:
+
+  ```csv
+  customer,vin,tuned_bin,stock_bin,xdf
+  Kunde A,DMETEST0000000001,tunes/kunde_a_v2.bin,,
+  Kunde B,DMETEST0000000002,tunes/kunde_b.bin,,
+  ```
+
+  `stock_bin` und `xdf` sind optional; leer bedeutet „aus dem Lock-Tab".
+  Relative Pfade beziehen sich auf den Ort der CSV. Semikolon und Tabulator
+  werden ebenfalls erkannt, die Kopfzeile darf fehlen.
+- **Export report…** schreibt Status und Ergebnisdatei pro Job als CSV.
+
+### Einstellungen
+
+![MHD Lock Tool — Settings](docs/screenshot-mhd-lock-settings.png)
+
+| Einstellung | Bedeutung |
+| --- | --- |
+| Pfad zum Builder | deine `TuningMapBuilder-*.exe` bzw. MHD Map Encryption |
+| Extra-Argumente | normalerweise leer |
+| Timeout pro Job | Abbruch, falls der Builder hängt |
+| Builder ins Arbeitsverzeichnis kopieren | entspricht dem Handbetrieb (empfohlen) |
+| Arbeitsverzeichnis als Argument | nur falls deine Version einen Pfad erwartet |
+| Ausgabeordner | Standardablage der `.mhd` |
+| Namensvorlage | `{customer} {vin} {date} {time} {datetime} {tuned} {stock} {source} {n}` — `{source}` behält den Namen, den der Builder vergeben hat |
+| Ordner nach Erfolg öffnen | Explorer springt zur fertigen Datei |
+| Arbeitsverzeichnis behalten | zum Nachsehen, was der Builder gesehen hat |
+
+Gespeichert wird automatisch nach
+`%APPDATA%\DME Innovation\mhd_lock_tool.json`
+(macOS `~/Library/Application Support/…`, Linux `~/.config/…`).
+
+### Erfolg und Fehler
+
+Der Builder endet mit `Press a key…` und liefert deshalb keinen verlässlichen
+Exit-Code. Ausgewertet wird stattdessen seine Konsolenausgabe: als Erfolg gilt
+`Map correctly written` **und** eine tatsächlich erzeugte `.mhd`. Meldungen wie
+`Error - one and only one xdf …`, `Missing your .toolkey file`,
+`Invalid key`, `******** CRC error` oder `Modification not in xdf` werden
+erkannt, rot hervorgehoben und in den Job-Report übernommen.
+
+---
+
+## Windows-.exe bauen
+
+```bat
+build_exe.bat
+```
+
+Das Skript installiert PyInstaller und baut beide Programme nach `dist\`:
+
+```
+dist\AutoTuner Backup Tool.exe
+dist\MHD Lock Tool.exe
+```
+
+Ohne Windows-Rechner: der GitHub-Actions-Workflow
+`.github/workflows/build.yml` baut beide `.exe` auf einem Windows-Runner und
+hängt sie als Artefakt an den Lauf.
+
+---
+
+## Projektstruktur
+
+```
+autotuner_tool.py        AutoTuner Backup Tool (Logik + GUI)
+mhd_lock_tool.py         MHD Lock Tool (Logik + GUI)
+dme_ui.py                gemeinsames Design-System (Cards, Tabs, Banner, Tabellen …)
+dme_brand.py             eingebettetes DME-Logo, Fenster-Icon
+tools/generate_assets.py erzeugt alle Logo-Assets aus dem Vektor-Master
+tools/xwd2png.py         Screenshot-Helfer für die headless GUI-Tests
+assets/                  Icon, Wortmarken, Logo-Quelle (.ai)
+tests/                   Unit-Tests und GUI-Smoke-Tests
+docs/                    Screenshots
+build_exe.bat            PyInstaller-Build für beide Tools
+```
+
+---
+
+## Branding anpassen
+
+Alle Bildmarken entstehen aus einer einzigen Quelle:
+`assets/logo-source/DME-Innovation.ai`.
+
+```bash
+pip install pymupdf pillow
+python tools/generate_assets.py          # Assets neu rendern + dme_brand.py aktualisieren
+python tools/generate_assets.py --check  # nur prüfen, ob alles aktuell ist
+```
+
+Erzeugt werden Icon (16–256 px als `.ico`), Wortmarke in Schwarz und Weiß sowie
+die base64-Blobs, die direkt in `dme_brand.py` liegen — die Tools brauchen zur
+Laufzeit also keine Bilddateien.
+
+Die Akzentfarbe und die komplette Palette stehen oben in `dme_ui.py`.
+
+---
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -v        # 57 Tests, keine Anzeige nötig
+
+# GUI-Tests (brauchen tkinter und eine Anzeige)
+xvfb-run -a -s "-screen 0 1000x800x24" python tests/smoke_gui_autotuner.py
+xvfb-run -a -s "-screen 0 1040x820x24" python tests/smoke_gui_mhd_lock.py
+```
+
+Der GUI-Test des Lock Tools ersetzt den lizenzierten Builder durch ein Stub-
+Skript, das dieselben Konsolenmeldungen ausgibt — damit läuft die komplette
+Kette (Prüfung → Staging → Lauf → Ablage) auch ohne MHD-Software durch.
+
+---
+
+## Wichtige Hinweise
+
+- **Keine Fremdsoftware im Repo.** Weder das MHD Map Encryption Tool noch der
+  MHD+ Tuning Guide liegen hier — beides gehört MHD Tuning und bleibt bei dir.
+- **Keine Kundendaten committen.** `.toolkey`, `*_vin.txt`, `*.mhd` und
+  `TuningMapBuilder*.exe` stehen in der `.gitignore`. Die VIN in den Screenshots
+  und Tests (`DMETEST…`) ist frei erfunden.
+- Vor jedem Flash gilt weiterhin: eigenes, geprüftes Backup des Steuergeräts.
+
+<sub>© DME Innovation</sub>

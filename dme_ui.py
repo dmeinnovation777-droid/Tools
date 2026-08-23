@@ -663,3 +663,41 @@ class Table(tk.Frame):
 
     def selection(self):
         return self.tree.selection()
+
+
+class Page(tk.Frame):
+    """
+    Standard page layout: scrollable body, sticky inline banner and a sticky
+    action bar, so the primary action never scrolls out of reach.
+    """
+
+    def __init__(self, parent, bg=BG, pad=22):
+        super().__init__(parent, bg=bg)
+        self.action = tk.Frame(self, bg=SURFACE)
+        self.action.pack(side=tk.BOTTOM, fill=tk.X)
+        tk.Frame(self.action, bg=BORDER_SOFT, height=1).pack(fill=tk.X)
+        self.action_row = tk.Frame(self.action, bg=SURFACE)
+        self.action_row.pack(fill=tk.X, padx=pad, pady=12)
+
+        holder = tk.Frame(self, bg=bg)
+        holder.pack(side=tk.BOTTOM, fill=tk.X, padx=pad, pady=(0, 12))
+        self.banner = Banner(holder, bg=bg)
+        self.banner.pack(fill=tk.X)
+
+        self.scroll = VScroll(self, bg=bg)
+        self.scroll.pack(fill=tk.BOTH, expand=True)
+        self.body = tk.Frame(self.scroll.inner, bg=bg)
+        self.body.pack(fill=tk.BOTH, expand=True, padx=pad, pady=(18, 8))
+
+    def intro(self, text, wraplength=860):
+        tk.Label(self.body, text=text, bg=self["bg"], fg=TEXT_DIM, font=f("body"),
+                 anchor="w", justify="left", wraplength=wraplength).pack(fill=tk.X, pady=(0, 16))
+
+    def card(self, title, hint=None, pady=(0, 14)):
+        card = Card(self.body, title=title, hint=hint)
+        card.pack(fill=tk.X, pady=pady)
+        return card
+
+    def summary(self, variable):
+        tk.Label(self.action_row, textvariable=variable, bg=SURFACE, fg=TEXT_DIM,
+                 font=f("small"), anchor="w").pack(side=tk.LEFT)

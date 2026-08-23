@@ -360,40 +360,15 @@ class AutoTunerTool(_TkBase):
                 return key
         return "z2b"
 
-    def _page_skeleton(self):
-        """A page = scrollable body + sticky banner + sticky action bar."""
-        page = tk.Frame(self._page_host, bg=ui.BG)
-        action = tk.Frame(page, bg=ui.SURFACE)
-        action.pack(side=tk.BOTTOM, fill=tk.X)
-        tk.Frame(action, bg=ui.BORDER_SOFT, height=1).pack(fill=tk.X)
-        banner_host = tk.Frame(page, bg=ui.BG)
-        banner_host.pack(side=tk.BOTTOM, fill=tk.X, padx=22, pady=(0, 12))
-        banner = ui.Banner(banner_host)
-        banner.pack(fill=tk.X)
-        scroll = ui.VScroll(page, bg=ui.BG)
-        scroll.pack(fill=tk.BOTH, expand=True)
-        body = tk.Frame(scroll.inner, bg=ui.BG)
-        body.pack(fill=tk.BOTH, expand=True, padx=22, pady=(18, 8))
-        return page, body, banner, action
-
-    @staticmethod
-    def _card(parent, title, hint=None, pady=(0, 14)):
-        card = ui.Card(parent, title=title, hint=hint)
-        card.pack(fill=tk.X, pady=pady)
-        return card
-
     # ── Page 1: ZIP → BIN ────────────────────────────────────────────────────
 
     def _build_zip_to_bin(self):
-        page, body, banner, action = self._page_skeleton()
-        self._z2b_banner = banner
+        page = ui.Page(self._page_host)
+        self._z2b_banner = page.banner
+        page.intro("Concentrate every memory part of an AutoTuner .zip/.bak backup into "
+                   "one continuous .bin for your tuning software.")
 
-        tk.Label(body, text="Concentrate every memory part of an AutoTuner .zip/.bak "
-                            "backup into one continuous .bin for your tuning software.",
-                 bg=ui.BG, fg=ui.TEXT_DIM, font=ui.f("body"), anchor="w",
-                 justify="left", wraplength=820).pack(fill=tk.X, pady=(0, 16))
-
-        src = self._card(body, "Source backup")
+        src = page.card("Source backup")
         self._z2b_zip_var = tk.StringVar()
         self._z2b_path = ui.PathRow(src.body, "AutoTuner backup (.zip / .bak)",
                                     self._z2b_zip_var, self._browse_zip,
@@ -402,7 +377,7 @@ class AutoTunerTool(_TkBase):
         self._z2b_path.pack(fill=tk.X)
         self._z2b_zip_var.trace_add('write', lambda *_: self._on_zip_path_changed())
 
-        self._z2b_preview_card = self._card(body, "Archive contents", hint="—")
+        self._z2b_preview_card = page.card("Archive contents", hint="—")
         self._z2b_log = ui.LogView(self._z2b_preview_card.body, height=13)
         self._z2b_log.pack(fill=tk.BOTH, expand=True)
         tools = tk.Frame(self._z2b_preview_card.body, bg=ui.CARD)
@@ -414,7 +389,7 @@ class AutoTunerTool(_TkBase):
                   size="sm").pack(side=tk.RIGHT)
         self._z2b_log.set_text("Select a .zip or .bak backup to inspect its parts.", "dim")
 
-        out = self._card(body, "Output")
+        out = page.card("Output")
         self._z2b_out_var = tk.StringVar()
         self._z2b_out_path = ui.PathRow(out.body, "Combined binary (.bin)",
                                         self._z2b_out_var, self._browse_zip_output,
@@ -423,16 +398,14 @@ class AutoTunerTool(_TkBase):
         self._z2b_out_path.pack(fill=tk.X)
 
         self._z2b_summary = tk.StringVar(value="Waiting for a backup file")
-        self._action_bar(action, self._z2b_summary, "Concentrate to .bin  ⬇",
+        self._action_bar(page, self._z2b_summary, "Concentrate to .bin  ⬇",
                          self._run_zip_to_bin)
         return page
 
-    def _action_bar(self, action, summary_var, label, command):
-        row = tk.Frame(action, bg=ui.SURFACE)
-        row.pack(fill=tk.X, padx=22, pady=12)
-        tk.Label(row, textvariable=summary_var, bg=ui.SURFACE, fg=ui.TEXT_DIM,
-                 font=ui.f("small"), anchor="w").pack(side=tk.LEFT)
-        btn = ui.button(row, label, command, variant="primary", size="lg")
+    @staticmethod
+    def _action_bar(page, summary_var, label, command):
+        page.summary(summary_var)
+        btn = ui.button(page.action_row, label, command, variant="primary", size="lg")
         btn.pack(side=tk.RIGHT)
         ui.ToolTip(btn, "Ctrl + Enter")
         return btn
@@ -554,15 +527,12 @@ class AutoTunerTool(_TkBase):
     # ── Page 2: BIN → ZIP ────────────────────────────────────────────────────
 
     def _build_bin_to_zip(self):
-        page, body, banner, action = self._page_skeleton()
-        self._b2z_banner = banner
+        page = ui.Page(self._page_host)
+        self._b2z_banner = page.banner
+        page.intro("Split a modified .bin back into its memory parts and package them "
+                   "as an AutoTuner-compatible .zip backup.")
 
-        tk.Label(body, text="Split a modified .bin back into its memory parts and package "
-                            "them as an AutoTuner-compatible .zip backup.",
-                 bg=ui.BG, fg=ui.TEXT_DIM, font=ui.f("body"), anchor="w",
-                 justify="left", wraplength=820).pack(fill=tk.X, pady=(0, 16))
-
-        src = self._card(body, "Source binary")
+        src = page.card("Source binary")
         self._b2z_bin_var = tk.StringVar()
         self._b2z_path = ui.PathRow(src.body, "Modified binary (.bin)", self._b2z_bin_var,
                                     self._browse_bin,
@@ -571,7 +541,7 @@ class AutoTunerTool(_TkBase):
         self._b2z_path.pack(fill=tk.X)
         self._b2z_bin_var.trace_add('write', lambda *_: self._on_bin_path_changed())
 
-        split = self._card(body, "Split configuration", hint="0 parts")
+        split = page.card("Split configuration", hint="0 parts")
         self._split_card = split
 
         toolbar = tk.Frame(split.body, bg=ui.CARD)
@@ -620,8 +590,8 @@ class AutoTunerTool(_TkBase):
         self._b2z_match = tk.Label(totals, text="", bg=ui.CARD, font=ui.f("small"))
         self._b2z_match.pack(side=tk.RIGHT)
 
-        meta_card = self._card(body, "Vehicle / ECU metadata",
-                               hint="optional — written to contents.ini")
+        meta_card = page.card("Vehicle / ECU metadata",
+                              hint="optional — written to contents.ini")
         grid = tk.Frame(meta_card.body, bg=ui.CARD)
         grid.pack(fill=tk.X)
         self._meta_vars = {}
@@ -634,7 +604,7 @@ class AutoTunerTool(_TkBase):
         for col in range(3):
             grid.grid_columnconfigure(col, weight=1, uniform="meta")
 
-        out = self._card(body, "Output")
+        out = page.card("Output")
         self._b2z_out_var = tk.StringVar()
         self._b2z_out_path = ui.PathRow(out.body, "AutoTuner backup (.zip)",
                                         self._b2z_out_var, self._browse_zip_out,
@@ -643,7 +613,7 @@ class AutoTunerTool(_TkBase):
         self._b2z_out_path.pack(fill=tk.X)
 
         self._b2z_summary = tk.StringVar(value="Waiting for a .bin file")
-        self._action_bar(action, self._b2z_summary, "Split & package to .zip  ⬆",
+        self._action_bar(page, self._b2z_summary, "Split & package to .zip  ⬆",
                          self._run_bin_to_zip)
         self._refresh_parts()
         return page

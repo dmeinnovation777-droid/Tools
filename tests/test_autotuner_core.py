@@ -136,7 +136,7 @@ class TestBinToZip(unittest.TestCase):
     def test_creates_autotuner_archive(self):
         out = os.path.join(self.dir, "out.zip")
         ok, msg = at.bin_to_zip(self.bin_path, out, self.config,
-                                {"make": "BMW", "model": "M4", "vin": "WBS3R9C50FK000000"})
+                                {"make": "BMW", "model": "M4", "vin": "DMETEST0000000003"})
         self.assertTrue(ok, msg)
         with zipfile.ZipFile(out) as zf:
             names = zf.namelist()
@@ -150,7 +150,7 @@ class TestBinToZip(unittest.TestCase):
             meta = at.parse_ini(zf.read("contents.ini").decode())
             self.assertEqual(meta["VehicleProducer"], "BMW")
             self.assertEqual(meta["VehicleBuild"], "M4")
-            self.assertEqual(meta["VehicleVIN"], "WBS3R9C50FK000000")
+            self.assertEqual(meta["VehicleVIN"], "DMETEST0000000003")
 
     def test_rejects_size_mismatch(self):
         bad = list(self.config)
