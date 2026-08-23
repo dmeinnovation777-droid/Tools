@@ -179,3 +179,82 @@ class TestBinToZip(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestLayoutMemory(unittest.TestCase):
+    """A layout the tool has seen once must never have to be typed in again."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old = os.environ.get("XDG_CONFIG_HOME")
+        if os.name == "nt" or sys.platform == "darwin":
+            self.skipTest("config path is not driven by XDG_CONFIG_HOME here")
+        os.environ["XDG_CONFIG_HOME"] = self.tmp.name
+
+    def tearDown(self):
+        if self._old is None:
+            os.environ.pop("XDG_CONFIG_HOME", None)
+        else:
+            os.environ["XDG_CONFIG_HOME"] = self._old
+        self.tmp.cleanup()
+
+    def test_round_trip_through_disk(self):
+        parts = [{"name": "iflash0.bin", "size": 4194304},
+                 {"name": "iflash1.bin", "size": 4194304},
+                 {"name": "dflash0.bin", "size": 262144},
+                 {"name": "dflash1.bin", "size": 262144}]
+        at.remember_layout(parts, "Mercedes-GLE-MG1CP002-Bench-backup.zip")
+        found = at.layout_for_size(8912896)
+        self.assertIsNotNone(found)
+        restored, label = found
+        self.assertEqual([p["name"] for p in restored], [p["name"] for p in parts])
+        self.assertEqual(sum(p["size"] for p in restored), 8912896)
+        self.assertEqual(label, "Mercedes-GLE-MG1CP002-Bench-backup.zip")
+
+    def test_unknown_size_returns_nothing(self):
+        self.assertIsNone(at.layout_for_size(1234567))
+
+    def test_layout_is_keyed_by_total_size(self):
+        at.remember_layout([{"name": "a.bin", "size": 100}], "a")
+        at.remember_layout([{"name": "b.bin", "size": 200}], "b")
+        self.assertEqual(at.layout_for_size(100)[0][0]["name"], "a.bin")
+        self.assertEqual(at.layout_for_size(200)[0][0]["name"], "b.bin")
+
+    def test_newer_layout_replaces_the_older_one_of_equal_size(self):
+        at.remember_layout([{"name": "old.bin", "size": 64}], "old")
+        at.remember_layout([{"name": "new.bin", "size": 64}], "new")
+        self.assertEqual(at.layout_for_size(64)[1], "new")
+
+    def test_empty_layout_is_not_stored(self):
+        at.remember_layout([], "nothing")
+        self.assertEqual(at.load_layouts(), {})
+
+    def test_store_is_capped(self):
+        for size in range(1, at.LAYOUT_LIMIT + 15):
+            at.remember_layout([{"name": "p.bin", "size": size}], str(size))
+        self.assertLessEqual(len(at.load_layouts()), at.LAYOUT_LIMIT)
+
+    def test_corrupt_store_is_survivable(self):
+        os.makedirs(os.path.dirname(at.layout_store_path()), exist_ok=True)
+        with open(at.layout_store_path(), "w") as handle:
+            handle.write("{not json")
+        self.assertEqual(at.load_layouts(), {})
+        at.remember_layout([{"name": "x.bin", "size": 8}], "x")
+        self.assertIsNotNone(at.layout_for_size(8))
+
+
+class TestPresets(unittest.TestCase):
+    def test_mg1cp002_matches_a_real_bench_backup(self):
+        """8,912,896 bytes — the size that had no preset before."""
+        self.assertEqual(at.preset_for_size(8912896), "MG1CP002")
+        self.assertEqual(sum(s for _, s in at.PRESETS["MG1CP002"]), 8912896)
+
+    def test_med17_preset_still_matches(self):
+        self.assertEqual(at.preset_for_size(4259840), "MED17.1.1")
+
+    def test_unknown_size_has_no_preset(self):
+        self.assertIsNone(at.preset_for_size(123))
+
+    def test_every_preset_has_metadata(self):
+        for name in at.PRESETS:
+            self.assertIn(name, at.PRESET_META, name)

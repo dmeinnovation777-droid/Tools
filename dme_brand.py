@@ -8,11 +8,12 @@ edit them by hand, re-run the generator instead.
 
 import base64
 import os
+import sys
 import tempfile
 
 VENDOR = "DME Innovation"
 SUITE = "DME Innovation Tools"
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 PUBLISHER_URL = "https://github.com/dmeinnovation777-droid/Tools"
 
 # Colour of the header surface the wordmark is composited onto (see dme_ui.SURFACE)
@@ -711,6 +712,17 @@ LOGO_WHITE_B64 = (
     "yChtjn6l72s29TePOvSksvQzkJ3ZbZE6ODuEYD6SQvJzpA7shYSr3Y4s1hipEZRXictlRlt4C8C5"
     "yoJnuOGI/weCv2SVfMRBHAAAAABJRU5ErkJggg=="
 )
+
+
+def config_dir() -> str:
+    """Per-user settings folder for every DME tool."""
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    elif sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, VENDOR)
 
 
 def write_ico(path: str) -> str:

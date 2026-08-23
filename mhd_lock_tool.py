@@ -1121,19 +1121,29 @@ class MhdLockTool(_TkBase):
 
     # ── Shell ────────────────────────────────────────────────────────────────
 
+    NAV = [
+        {"key": "lock", "label": "Lock", "title": "Lock a tune",
+         "subtitle": "Pick the customer's tuned file — stock ROM, XDF and tool key are "
+                     "found automatically. Check the VIN, press Lock. That is all."},
+        {"key": "batch", "label": "Batch", "title": "Batch",
+         "subtitle": "Lock a whole queue in one go. Stock ROM and XDF are resolved per "
+                     "file, and every job runs in its own clean folder."},
+        {"key": "settings", "label": "Settings", "title": "Settings",
+         "subtitle": "Point the tool at your own licensed MHD map builder and your key. "
+                     "Set once, used for every job."},
+    ]
+
     def _build(self):
-        ui.Header(self, brand, APP_NAME, APP_VERSION, APP_TAGLINE).pack(fill=tk.X)
-        self.tabs = ui.TabBar(self, [("lock", "Lock"), ("batch", "Batch"),
-                                     ("settings", "Settings")], self._show_page)
-        self.tabs.pack(fill=tk.X)
-        self.status = ui.StatusBar(self, f"{brand.VENDOR}  ·  {APP_NAME} v{APP_VERSION}")
-        self.status.pack(side=tk.BOTTOM, fill=tk.X)
-        self._host = tk.Frame(self, bg=ui.BG)
-        self._host.pack(fill=tk.BOTH, expand=True)
+        self.shell = ui.Shell(self, brand, APP_NAME, APP_VERSION, self.NAV,
+                              self._show_page)
+        self.shell.pack(fill=tk.BOTH, expand=True)
+        self.tabs = self.shell
+        self.status = self.shell.status
+        self._host = self.shell.host
         self.pages = {"lock": self._build_lock_page(),
                       "batch": self._build_batch_page(),
                       "settings": self._build_settings_page()}
-        self.tabs.select("lock")
+        self.shell.select("lock")
 
     def _show_page(self, key):
         for page in self.pages.values():
@@ -1145,8 +1155,6 @@ class MhdLockTool(_TkBase):
     def _build_lock_page(self):
         page = ui.Page(self._host)
         self.lock_page = page
-        page.intro("Pick the customer's tuned file — stock ROM, XDF and tool key are "
-                   "found automatically. Check the VIN, press Lock. That is all.")
 
         # Shown only while something global is still missing.
         self.setup_card = ui.Card(page.body, title="One-time setup")
@@ -1410,9 +1418,6 @@ class MhdLockTool(_TkBase):
     def _build_batch_page(self):
         page = ui.Page(self._host)
         self.batch_page = page
-        page.intro("Lock a whole queue in one go. Stock ROM and XDF are resolved per file, "
-                   "so tunes from different cars can sit in the same queue. Every job runs in "
-                   "its own clean folder — one bad file can never affect another customer.")
 
         queue_card = page.card("Job queue", hint="0 jobs")
         self.batch_card = queue_card
@@ -1479,9 +1484,6 @@ class MhdLockTool(_TkBase):
 
     def _build_settings_page(self):
         page = ui.Page(self._host)
-        page.intro("The MHD map builder is not part of this tool — point it at your own "
-                   "licensed copy (TuningMapBuilder / MHD Map Encryption). Settings are saved "
-                   f"automatically to {config_path()}")
 
         builder = page.card("MHD map builder")
         self.var_exe = tk.StringVar()

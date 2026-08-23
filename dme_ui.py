@@ -19,19 +19,19 @@ from tkinter import font as tkfont
 # ─────────────────────────────────────────────────────────────────────────────
 # Palette
 # ─────────────────────────────────────────────────────────────────────────────
-BG = "#0E0F13"          # window / page background
-SURFACE = "#15171C"     # header + status bar (must match dme_brand.HEADER_BG)
-CARD = "#181B21"        # card background
-CARD_ALT = "#1C2027"    # table header / nested rows
-HOVER = "#20242C"       # hover fill
-BORDER = "#272C35"      # card + control borders
-BORDER_SOFT = "#1F242B"
-FIELD = "#0F1217"       # entry background
-FIELD_BORDER = "#2C323C"
+BG = "#0F1115"          # working canvas
+SURFACE = "#0B0D11"     # sidebar (must match dme_brand.HEADER_BG)
+CARD = "#171A20"        # elevated surface
+CARD_ALT = "#1E222A"    # nested rows, table headers
+HOVER = "#232830"       # hover fill
+BORDER = "#23272F"      # hairline, barely there
+BORDER_SOFT = "#1A1D23"
+FIELD = "#0D0F13"       # input well
+FIELD_BORDER = "#2A2F39"
 
-TEXT = "#E9ECF1"
-TEXT_DIM = "#8E97A5"
-TEXT_FAINT = "#5C6572"
+TEXT = "#E9ECF2"
+TEXT_DIM = "#949CA9"
+TEXT_FAINT = "#646C79"
 
 ACCENT = "#FFAA00"      # DME amber
 ACCENT_HOVER = "#FFC24D"
@@ -122,13 +122,15 @@ def init(root) -> None:
     mono = _pick(root, _MONO_CANDIDATES, "TkFixedFont")
     FONTS.update({
         "title":  (ui, 15, "bold"),
-        "h1":     (ui, 12, "bold"),
+        "h1":     (ui, 16, "bold"),
+        "h1s":    (ui, 12, "bold"),
         "h2":     (ui, 10, "bold"),
         "body":   (ui, 10),
         "label":  (ui, 9),
         "small":  (ui, 9),
         "micro":  (ui, 8),
         "tab":    (ui, 10, "bold"),
+        "nav":    (ui, 10, "bold"),
         "button": (ui, 10, "bold"),
         "mono":   (mono, 9),
         "mono_sm": (mono, 8),
@@ -196,6 +198,46 @@ def on_hover(widget, normal, active, fg_normal=None, fg_active=None):
     widget.bind("<Leave>", leave, add="+")
 
 
+def _round_points(x1, y1, x2, y2, r):
+    return [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+            x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+
+
+def round_corners(widget, radius=None, outer_bg=BG):
+    """
+    Give a normally packed widget rounded corners.
+
+    Four small canvases sit in the corners and paint the area outside the arc in
+    the surrounding colour. The widget keeps its own geometry manager, so this
+    costs nothing in layout terms.
+    """
+    radius = px(10) if radius is None else radius
+    inner_bg = widget["bg"]
+    corners = []
+    # corner order: top-left, top-right, bottom-right, bottom-left. The arc's
+    # bounding box is twice the radius and shifted so its centre lands on the
+    # inner corner; the visible quadrant is the one pointing outwards.
+    for index in range(4):
+        canvas = tk.Canvas(widget, width=radius, height=radius, bg=outer_bg,
+                           highlightthickness=0, bd=0)
+        start = (90, 0, 270, 180)[index]
+        offset = ((0, 0), (-radius, 0), (-radius, -radius), (0, -radius))[index]
+        canvas.create_arc(offset[0], offset[1], offset[0] + radius * 2,
+                          offset[1] + radius * 2, start=start, extent=90,
+                          fill=inner_bg, outline=inner_bg)
+        corners.append(canvas)
+
+    def place(_=None):
+        corners[0].place(x=0, y=0)
+        corners[1].place(relx=1.0, x=-radius, y=0)
+        corners[2].place(relx=1.0, rely=1.0, x=-radius, y=-radius)
+        corners[3].place(rely=1.0, x=0, y=-radius)
+
+    widget.bind("<Configure>", place, add="+")
+    place()
+    return corners
+
+
 def hr(parent, bg=BORDER, pady=0, padx=0):
     line = tk.Frame(parent, bg=bg, height=1)
     line.pack(fill=tk.X, pady=pady, padx=padx)
@@ -227,7 +269,8 @@ def reveal_in_file_manager(path: str) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 _VARIANTS = {
     "primary":   dict(bg=ACCENT, fg=ON_ACCENT, hover=ACCENT_HOVER, press=ACCENT_PRESS),
-    "secondary": dict(bg=CARD_ALT, fg=TEXT, hover=HOVER, press=BORDER),
+    "secondary": dict(bg=CARD_ALT, fg=TEXT, hover=HOVER, press=BORDER,
+                      border=FIELD_BORDER),
     "ghost":     dict(bg=CARD, fg=TEXT_DIM, hover=HOVER, press=BORDER),
     "danger":    dict(bg=CARD_ALT, fg=ERR, hover=ERR_BG, press=ERR_BG),
 }
@@ -238,19 +281,123 @@ _SIZES = {
 }
 
 
+class RoundedButton(tk.Canvas):
+    """A pill button drawn on a canvas - tk has no border radius of its own."""
+
+    def __init__(self, parent, text, command=None, variant="primary", size="md",
+                 bg=None, **_ignored):
+        spec = _VARIANTS[variant]
+        dims = _SIZES[size]
+        self._outer = bg or parent["bg"]
+        self._fill = spec["bg"] if variant != "ghost" else self._outer
+        self._hover = spec["hover"]
+        self._press = spec["press"]
+        self._fg = spec["fg"]
+        self._command = command
+        self._state = "normal"
+        self._font = f(dims["font"])
+        self._padx, self._pady = px(dims["padx"]), px(dims["pady"])
+        self._radius = px(7)
+        self._border = spec.get("border")
+
+        super().__init__(parent, bg=self._outer, highlightthickness=0, bd=0,
+                         takefocus=1, cursor="hand2")
+        self._shape = None
+        self._label = None
+        self._text = text
+        self._measure()
+        self.bind("<Configure>", lambda _e: self._draw())
+        self.bind("<Enter>", lambda _e: self._paint(self._hover))
+        self.bind("<Leave>", lambda _e: self._paint(self._fill))
+        self.bind("<ButtonPress-1>", lambda _e: self._paint(self._press))
+        self.bind("<ButtonRelease-1>", self._release)
+        self.bind("<FocusIn>", lambda _e: self._paint(self._hover))
+        self.bind("<FocusOut>", lambda _e: self._paint(self._fill))
+        self.bind("<Return>", lambda _e: self._invoke())
+        self.bind("<space>", lambda _e: self._invoke())
+
+    # geometry ---------------------------------------------------------------
+    def _measure(self):
+        probe = tkfont.Font(font=self._font)
+        width = probe.measure(self._text) + self._padx * 2
+        height = probe.metrics("linespace") + self._pady * 2
+        self.configure(width=width, height=height)
+
+    def _draw(self):
+        self.delete("all")
+        w, h = self.winfo_width(), self.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+        fill = self._fill if self._state != "disabled" else CARD_ALT
+        self._shape = self.create_polygon(
+            _round_points(1, 1, w - 1, h - 1, self._radius), smooth=True, splinesteps=24,
+            fill=fill, outline=self._border or fill)
+        colour = self._fg if self._state != "disabled" else TEXT_FAINT
+        self._label = self.create_text(w / 2, h / 2, text=self._text, fill=colour,
+                                       font=self._font)
+
+    def _paint(self, colour):
+        if self._state == "disabled" or self._shape is None:
+            return
+        self.itemconfigure(self._shape, fill=colour,
+                           outline=self._border or colour)
+
+    def _release(self, _event=None):
+        self._paint(self._hover)
+        self._invoke()
+
+    def _invoke(self):
+        if self._state != "disabled" and self._command:
+            self._command()
+
+    # tk-compatible surface --------------------------------------------------
+    def configure(self, cnf=None, **kw):
+        options = dict(cnf or {}, **kw)
+        redraw = False
+        if "state" in options:
+            self._state = options.pop("state")
+            self.configure(cursor="arrow" if self._state == "disabled" else "hand2")
+            redraw = True
+        if "text" in options:
+            self._text = options.pop("text")
+            self._measure()
+            redraw = True
+        if "command" in options:
+            self._command = options.pop("command")
+        for key in ("bg", "background"):
+            if key in options and options[key]:
+                self._outer = options.pop(key)
+                if self._fill == self._outer or True:
+                    pass
+                super().configure(bg=self._outer)
+                redraw = True
+        for key in ("fg", "foreground"):
+            if key in options:
+                self._fg = options.pop(key)
+                redraw = True
+        options.pop("activebackground", None)
+        options.pop("activeforeground", None)
+        if options:
+            super().configure(**options)
+        if redraw:
+            self._draw()
+        return None
+
+    config = configure
+
+    def cget(self, key):
+        if key == "state":
+            return self._state
+        if key == "text":
+            return self._text
+        return super().cget(key)
+
+    def invoke(self):
+        self._invoke()
+
+
 def button(parent, text, command=None, variant="primary", size="md", bg=None, **kw):
-    spec = _VARIANTS[variant]
-    dims = _SIZES[size]
-    base_bg = spec["bg"] if variant != "ghost" else (bg or parent["bg"])
-    btn = tk.Button(parent, text=text, command=command, relief="flat", bd=0,
-                    highlightthickness=0, cursor="hand2",
-                    bg=base_bg, fg=spec["fg"],
-                    activebackground=spec["press"], activeforeground=spec["fg"],
-                    disabledforeground=TEXT_FAINT,
-                    font=f(dims["font"]), padx=px(dims["padx"]), pady=px(dims["pady"]),
-                    **kw)
-    on_hover(btn, base_bg, spec["hover"])
-    return btn
+    return RoundedButton(parent, text, command, variant=variant, size=size, bg=bg, **kw)
 
 
 def icon_button(parent, text, command=None, bg=CARD, fg=TEXT_FAINT, hover_fg=ERR,
@@ -322,8 +469,8 @@ class Card(tk.Frame):
     """Bordered content block with an optional title row."""
 
     def __init__(self, parent, title=None, hint=None, bg=CARD, pad=(16, 14)):
-        super().__init__(parent, bg=bg, highlightbackground=BORDER,
-                         highlightthickness=1, bd=0)
+        super().__init__(parent, bg=bg, highlightthickness=0, bd=0)
+        round_corners(self, px(12), outer_bg=parent["bg"])
         px_, py = px(pad[0]), px(pad[1])
         self.hint_var = tk.StringVar(value=hint or "")
         if title:
@@ -400,9 +547,14 @@ class Banner(tk.Frame):
         self._text = tk.Label(inner, text="", bg=OK_BG, fg=TEXT, font=f("small"),
                               anchor="w", justify="left", wraplength=560)
         self._text.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=px(10))
-        self._action = button(inner, "", None, variant="ghost", size="sm", bg=OK_BG)
+        self._action = tk.Label(inner, text="", bg=OK_BG, fg=OK, font=f("small"),
+                                cursor="hand2", padx=px(8))
+        self._action_command = None
+        self._action.bind("<Button-1>", lambda _e: self._action_command
+                          and self._action_command())
         self._close = icon_button(inner, "✕", self.hide, bg=OK_BG, fg=TEXT_FAINT,
                                   hover_fg=TEXT, hover_bg=OK_BG)
+        self._corners = round_corners(self._wrap, px(10), outer_bg=bg)
         self._visible = False
 
     def show(self, kind, text, action_text=None, action=None):
@@ -410,6 +562,8 @@ class Banner(tk.Frame):
         icons = {"ok": "✓", "error": "✕", "warn": "!", "info": "i", "busy": "•"}
         self._wrap.configure(bg=bg)
         self._inner.configure(bg=bg)
+        for corner in self._corners:
+            corner.itemconfigure("all", fill=bg, outline=bg)
         self._bar.configure(bg=fg)
         self._icon.configure(bg=bg, fg=fg, text=icons.get(kind, "i"))
         self._text.configure(bg=bg, text=text)
@@ -418,10 +572,10 @@ class Banner(tk.Frame):
         self._close.pack_forget()
         self._action.pack_forget()
         if action_text and action:
-            self._action.configure(text=action_text, command=action, bg=bg,
-                                   fg=fg, activebackground=bg, activeforeground=fg)
-            on_hover(self._action, bg, bg, fg_normal=fg, fg_active=TEXT)
-            self._action.pack(side=tk.RIGHT, padx=(6, 4))
+            self._action_command = action
+            self._action.configure(text=action_text, bg=bg, fg=fg,
+                                   font=(f("small")[0], f("small")[1], "underline"))
+            self._action.pack(side=tk.RIGHT, padx=(px(6), px(4)))
         self._close.pack(side=tk.RIGHT, padx=(0, 8))
         if not self._visible:
             self._wrap.pack(fill=tk.X)
@@ -666,7 +820,7 @@ class Page(tk.Frame):
     action bar, so the primary action never scrolls out of reach.
     """
 
-    def __init__(self, parent, bg=BG, pad=22):
+    def __init__(self, parent, bg=BG, pad=32):
         super().__init__(parent, bg=bg)
         pad = px(pad)
         self.action = tk.Frame(self, bg=SURFACE)
@@ -774,3 +928,110 @@ class ResolvedRow(tk.Frame):
         self._value.configure(text=value or "not found",
                               fg=TEXT if value else ERR)
         self._source.configure(text=source)
+
+
+class _NavItem(tk.Frame):
+    """One sidebar entry. Active state is a filled pill, not a coloured line."""
+
+    def __init__(self, parent, label, on_click, bg=SURFACE):
+        super().__init__(parent, bg=bg)
+        self._bg = bg
+        self._label = tk.Label(self, text=label, bg=bg, fg=TEXT_DIM, font=f("nav"),
+                               anchor="w", padx=px(14), pady=px(9), cursor="hand2")
+        self._label.pack(fill=tk.X)
+        for widget in (self, self._label):
+            widget.bind("<Button-1>", lambda _e: on_click())
+            widget.bind("<Enter>", self._enter)
+            widget.bind("<Leave>", self._leave)
+        self._active = False
+        round_corners(self, px(8), outer_bg=bg)
+
+    def _enter(self, _=None):
+        if not self._active:
+            self._paint(CARD_ALT, TEXT)
+
+    def _leave(self, _=None):
+        if not self._active:
+            self._paint(self._bg, TEXT_DIM)
+
+    def _paint(self, bg, fg):
+        self.configure(bg=bg)
+        self._label.configure(bg=bg, fg=fg)
+        for child in self.winfo_children():
+            if isinstance(child, tk.Canvas):
+                child.itemconfigure("all", fill=bg, outline=bg)
+
+    def set_active(self, active):
+        self._active = active
+        self._paint(CARD if active else self._bg, TEXT if active else TEXT_DIM)
+
+
+class Shell(tk.Frame):
+    """
+    Application frame: a sidebar for navigation, a title bar that names the
+    current view, the view itself, and a status line at the bottom.
+    """
+
+    def __init__(self, root, brand, product, version, nav, on_select):
+        super().__init__(root, bg=BG)
+        self._on_select = on_select
+        self._nav = {}
+        self._pages = dict((entry["key"], entry) for entry in nav)
+        self._active = None
+
+        side = tk.Frame(self, bg=SURFACE, width=px(238))
+        side.pack(side=tk.LEFT, fill=tk.Y)
+        side.pack_propagate(False)
+
+        head = tk.Frame(side, bg=SURFACE)
+        head.pack(fill=tk.X, padx=px(18), pady=(px(22), px(18)))
+        logo = brand.header_logo(head, scale=SCALE)
+        if logo is not None:
+            logo.pack(anchor="w")
+        else:
+            tk.Label(head, text=brand.VENDOR.upper(), bg=SURFACE, fg=TEXT,
+                     font=f("title")).pack(anchor="w")
+        tk.Label(head, text=product, bg=SURFACE, fg=TEXT_DIM, font=f("small"),
+                 anchor="w").pack(fill=tk.X, pady=(px(10), 0))
+
+        items = tk.Frame(side, bg=SURFACE)
+        items.pack(fill=tk.X, padx=px(12))
+        for entry in nav:
+            item = _NavItem(items, entry["label"], lambda k=entry["key"]: self.select(k))
+            item.pack(fill=tk.X, pady=px(2))
+            self._nav[entry["key"]] = item
+
+        foot = tk.Frame(side, bg=SURFACE)
+        foot.pack(side=tk.BOTTOM, fill=tk.X, padx=px(18), pady=px(18))
+        tk.Label(foot, text=f"v{version}", bg=SURFACE, fg=TEXT_FAINT,
+                 font=f("micro"), anchor="w").pack(fill=tk.X)
+
+        main = tk.Frame(self, bg=BG)
+        main.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        bar = tk.Frame(main, bg=BG)
+        bar.pack(fill=tk.X, padx=px(32), pady=(px(26), px(18)))
+        self._title = tk.Label(bar, text="", bg=BG, fg=TEXT, font=f("h1"), anchor="w")
+        self._title.pack(fill=tk.X)
+        self._subtitle = tk.Label(bar, text="", bg=BG, fg=TEXT_DIM, font=f("body"),
+                                  anchor="w", justify="left", wraplength=px(720))
+        self._subtitle.pack(fill=tk.X, pady=(px(4), 0))
+        bar.bind("<Configure>",
+                 lambda e: self._subtitle.configure(wraplength=max(px(320), e.width - px(8))))
+
+        self.status = StatusBar(main, f"{brand.VENDOR}  ·  {product}")
+        self.status.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.host = tk.Frame(main, bg=BG)
+        self.host.pack(fill=tk.BOTH, expand=True)
+
+    def select(self, key):
+        if key == self._active:
+            return
+        self._active = key
+        for name, item in self._nav.items():
+            item.set_active(name == key)
+        entry = self._pages[key]
+        self._title.configure(text=entry.get("title", entry["label"]))
+        self._subtitle.configure(text=entry.get("subtitle", ""))
+        self._on_select(key)

@@ -12,6 +12,7 @@ top of the shared DME widget kit (dme_ui.py / dme_brand.py).
 """
 
 import datetime
+import json
 import os
 import sys
 import zipfile
@@ -51,11 +52,73 @@ PRESETS = {
     "MEVD17.2.x": [("iflash0.bin", 2097152), ("iflash1.bin", 2097152),
                    ("dflash0.bin", 32768), ("dflash1.bin", 32768)],
 }
+PRESETS["MG1CP002"] = [("iflash0.bin", 4194304), ("iflash1.bin", 4194304),
+                       ("dflash0.bin", 262144), ("dflash1.bin", 262144)]
 PRESET_META = {
     "MED17.1.1": {"EcuBuild": "MED17.1.1", "EcuProducer": "Bosch", "EngineType": "PETROL"},
     "MED17.5.x": {"EcuBuild": "MED17.5", "EcuProducer": "Bosch", "EngineType": "PETROL"},
     "MEVD17.2.x": {"EcuBuild": "MEVD17.2", "EcuProducer": "Bosch", "EngineType": "PETROL"},
+    "MG1CP002": {"EcuBuild": "MG1CP002", "EcuProducer": "Bosch", "EngineType": "DIESEL"},
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Layout memory
+#
+# Every archive the tool opens teaches it one part layout. The layout is stored
+# by total size, so a .bin this tool produced can always be split again - even
+# for an ECU no preset covers.
+# ─────────────────────────────────────────────────────────────────────────────
+LAYOUT_LIMIT = 60
+
+
+def layout_store_path() -> str:
+    return os.path.join(brand.config_dir(), "autotuner_layouts.json")
+
+
+def load_layouts() -> dict:
+    try:
+        with open(layout_store_path(), "r", encoding="utf-8") as handle:
+            stored = json.load(handle)
+        return stored if isinstance(stored, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def remember_layout(parts: list[dict], label: str = "", store: dict = None) -> dict:
+    """Store one layout under its total size. Returns the updated store."""
+    parts = [{"name": p["name"], "size": int(p["size"])} for p in parts if p.get("name")]
+    if not parts:
+        return store if store is not None else load_layouts()
+    layouts = load_layouts() if store is None else store
+    total = sum(p["size"] for p in parts)
+    layouts[str(total)] = {"label": label, "parts": parts}
+    if len(layouts) > LAYOUT_LIMIT:
+        for key in list(layouts)[:len(layouts) - LAYOUT_LIMIT]:
+            layouts.pop(key, None)
+    try:
+        os.makedirs(os.path.dirname(layout_store_path()), exist_ok=True)
+        with open(layout_store_path(), "w", encoding="utf-8") as handle:
+            json.dump(layouts, handle, indent=2)
+    except OSError:
+        pass
+    return layouts
+
+
+def layout_for_size(size: int, store: dict = None) -> tuple[list[dict], str] | None:
+    """A remembered layout whose parts add up to exactly this file size."""
+    layouts = load_layouts() if store is None else store
+    entry = layouts.get(str(int(size)))
+    if not entry or not entry.get("parts"):
+        return None
+    return entry["parts"], entry.get("label", "")
+
+
+def preset_for_size(size: int) -> str | None:
+    for name, parts in PRESETS.items():
+        if sum(part_size for _, part_size in parts) == size:
+            return name
+    return None
 
 
 def part_sort_key(name: str):
@@ -325,21 +388,25 @@ class AutoTunerTool(_TkBase):
 
     # ── Shell ────────────────────────────────────────────────────────────────
 
+    NAV = [
+        {"key": "z2b", "label": "ZIP → BIN", "title": "ZIP → BIN",
+         "subtitle": "Concentrate every memory part of an AutoTuner .zip/.bak backup "
+                     "into one continuous .bin for your tuning software."},
+        {"key": "b2z", "label": "BIN → ZIP", "title": "BIN → ZIP",
+         "subtitle": "Split a modified .bin back into its memory parts and package them "
+                     "as an AutoTuner-compatible .zip backup."},
+    ]
+
     def _build(self):
-        ui.Header(self, brand, APP_NAME, APP_VERSION, APP_TAGLINE).pack(fill=tk.X)
-
-        self.tabs = ui.TabBar(self, [("z2b", "ZIP → BIN"), ("b2z", "BIN → ZIP")],
+        self.shell = ui.Shell(self, brand, APP_NAME, APP_VERSION, self.NAV,
                               self._show_page)
-        self.tabs.pack(fill=tk.X)
-
-        self.status = ui.StatusBar(self, f"{brand.VENDOR}  ·  {APP_NAME} v{APP_VERSION}")
-        self.status.pack(side=tk.BOTTOM, fill=tk.X)
-
-        self._page_host = tk.Frame(self, bg=ui.BG)
-        self._page_host.pack(fill=tk.BOTH, expand=True)
+        self.shell.pack(fill=tk.BOTH, expand=True)
+        self.tabs = self.shell          # the pages still say tabs.select(...)
+        self.status = self.shell.status
+        self._page_host = self.shell.host
 
         self.pages = {"z2b": self._build_zip_to_bin(), "b2z": self._build_bin_to_zip()}
-        self.tabs.select("z2b")
+        self.shell.select("z2b")
 
     def _show_page(self, key):
         for page in self.pages.values():
@@ -365,8 +432,6 @@ class AutoTunerTool(_TkBase):
     def _build_zip_to_bin(self):
         page = ui.Page(self._page_host)
         self._z2b_banner = page.banner
-        page.intro("Concentrate every memory part of an AutoTuner .zip/.bak backup into "
-                   "one continuous .bin for your tuning software.")
 
         src = page.card("Source backup")
         self._z2b_zip_var = tk.StringVar()
@@ -511,6 +576,7 @@ class AutoTunerTool(_TkBase):
 
         ok, msg, parts = zip_to_bin(zip_path, out_path)
         if ok:
+            remember_layout(parts, os.path.basename(zip_path))
             self._z2b_banner.show("ok", f"{msg}\n{out_path}",
                                   action_text="Show in folder",
                                   action=lambda: ui.reveal_in_file_manager(out_path))
@@ -526,8 +592,6 @@ class AutoTunerTool(_TkBase):
     def _build_bin_to_zip(self):
         page = ui.Page(self._page_host)
         self._b2z_banner = page.banner
-        page.intro("Split a modified .bin back into its memory parts and package them "
-                   "as an AutoTuner-compatible .zip backup.")
 
         src = page.card("Source binary")
         self._b2z_bin_var = tk.StringVar()
@@ -638,6 +702,13 @@ class AutoTunerTool(_TkBase):
         for i, row in enumerate(self._part_rows, 1):
             row.mount(i)
         if not self._part_rows:
+            size = self._bin_size()
+            if size and not layout_for_size(size) and not preset_for_size(size):
+                self._empty_hint(size)
+            else:
+                self._parts_empty.config(
+                    text="No parts configured — load a template, pick a preset, "
+                         "or add rows.")
             self._parts_empty.grid(row=0, column=0, columnspan=6, sticky="ew")
         self._split_card.set_hint(f"{len(self._part_rows)} part(s)")
         self._update_totals()
@@ -696,7 +767,36 @@ class AutoTunerTool(_TkBase):
             size = os.path.getsize(path)
             self._b2z_path.set_hint(f"{os.path.basename(path)} · {size:,} bytes "
                                     f"({format_bytes(size)})", "ok")
+            self._auto_layout(size)
         self._update_totals()
+
+    def _auto_layout(self, size: int):
+        """Fill the split table by itself: remembered layout first, preset second."""
+        if self._part_rows:
+            return
+        remembered = layout_for_size(size)
+        if remembered:
+            parts, label = remembered
+            for part in parts:
+                self._add_part_row(name=part["name"], size=part["size"])
+            self._refresh_parts()
+            origin = f" from {label}" if label else ""
+            self._b2z_banner.show("ok", f"Layout restored{origin} — {len(parts)} part(s), "
+                                        f"sizes match.")
+            self.status.set(f"Layout restored · {len(parts)} part(s)", "ok")
+            return
+        preset = preset_for_size(size)
+        if preset:
+            self._load_preset(preset)
+            self._b2z_banner.show("info", f"File size matches the {preset} layout — "
+                                          f"preset applied.")
+            return
+        self._empty_hint(size)
+
+    def _empty_hint(self, size: int):
+        self._parts_empty.config(
+            text=f"{size:,} bytes match no preset — open the original AutoTuner backup "
+                 f"with “Load from ZIP template”, then this layout is remembered.")
 
     def _browse_bin(self):
         path = filedialog.askopenfilename(
@@ -707,14 +807,6 @@ class AutoTunerTool(_TkBase):
         self._b2z_bin_var.set(path)
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         self._b2z_out_var.set(os.path.join(os.path.dirname(path), f"{stamp}-backup.zip"))
-        if not self._part_rows:
-            size = os.path.getsize(path)
-            match = next((n for n, parts in PRESETS.items()
-                          if sum(s for _, s in parts) == size), None)
-            if match:
-                self._load_preset(match)
-                self._b2z_banner.show("info",
-                                      f"File size matches the {match} layout — preset applied.")
 
     def _browse_zip_out(self):
         path = filedialog.asksaveasfilename(
@@ -734,6 +826,7 @@ class AutoTunerTool(_TkBase):
         except Exception as e:
             self._b2z_banner.show("error", f"Could not read the ZIP template: {e}")
             return
+        remember_layout(info['parts'], os.path.basename(path))
         self._clear_part_rows()
         for part in info['parts']:
             self._add_part_row(name=part['name'], size=part['size'])

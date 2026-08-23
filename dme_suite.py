@@ -145,7 +145,7 @@ class SuiteLauncher(_TkBase):
 
         available = resolve_tool(tool) is not None
         footer = tk.Frame(card.body, bg=ui.CARD)
-        footer.pack(fill=tk.X, pady=(16, 0))
+        footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(ui.px(16), 0))
         tk.Label(footer, text="" if available else "not installed", bg=ui.CARD,
                  fg=ui.ERR, font=ui.f("small")).pack(side=tk.LEFT)
         button = ui.button(footer, "Open  →", lambda t=tool: self._open(t),

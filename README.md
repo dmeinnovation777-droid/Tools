@@ -46,7 +46,7 @@ Größen bereit.
 unter *Assets*:
 
 ```
-DME-Innovation-Tools-Setup-1.2.0.exe
+DME-Innovation-Tools-Setup-1.3.0.exe
 ```
 
 Windows zeigt bei unsignierten Setups „Der Computer wurde durch Windows
@@ -103,10 +103,17 @@ Auf Linux zusätzlich `sudo apt install python3-tk`.
 
 1. Geänderte `.bin` auswählen. Passt die Dateigröße zu einem bekannten Layout,
    wird das Preset automatisch gesetzt.
-2. Aufteilung festlegen — per **Load from ZIP template** aus einem
-   Original-Backup, per Preset (MED17.1.1, MED17.5.x, MEVD17.2.x) oder von Hand.
-   Der Balken zeigt die Aufteilung, die Anzeige daneben meldet sofort
-   Überhang oder fehlende Bytes.
+2. Aufteilung festlegen — meistens von allein:
+   * **Gemerkte Aufteilung.** Jedes Archiv, das das Tool öffnet oder
+     zusammenführt, hinterlegt seine Aufteilung unter der Gesamtgröße. Eine
+     `.bin`, die dieses Tool erzeugt hat, lässt sich dadurch immer wieder
+     aufteilen — auch bei einem Steuergerät, für das es kein Preset gibt.
+   * **Preset**, wenn die Dateigröße zu MED17.1.1, MED17.5.x, MEVD17.2.x oder
+     MG1CP002 passt.
+   * **Load from ZIP template** aus einem Original-Backup, oder von Hand.
+
+   Der Balken zeigt die Aufteilung, die Anzeige daneben meldet sofort Überhang
+   oder fehlende Bytes.
 3. Optional Fahrzeug-/ECU-Daten eintragen (landen in der `contents.ini`).
 4. **Split & package to .zip** — erzeugt ein AutoTuner-kompatibles Archiv:
 
@@ -295,7 +302,7 @@ build_exe.bat           :: nur die drei .exe, ohne Setup
 (`winget install JRSoftware.InnoSetup`). Ergebnis:
 
 ```
-dist\DME-Innovation-Tools-Setup-1.2.0.exe
+dist\DME-Innovation-Tools-Setup-1.3.0.exe
 dist\DME Innovation Tools.exe
 dist\AutoTuner Backup Tool.exe
 dist\MHD Lock Tool.exe
@@ -350,7 +357,13 @@ komplette Palette oben in `dme_ui.py`.
 
 ## Bedienphilosophie
 
-Zwei Regeln, an die sich beide Programme halten:
+Die Programme tragen links eine feste Navigation, darüber den Namen der
+aktuellen Ansicht mit einer Zeile Erklärung, unten eine Statusleiste und über
+ihr die Aktion, die auf dieser Seite ansteht. Flächen heben sich durch
+Helligkeit voneinander ab statt durch Rahmen, Karten und Knöpfe haben runde
+Ecken.
+
+Dazu zwei Regeln, an die sich beide Programme halten:
 
 - **Keine Fenster ohne Anlass.** Keine Tooltips, die beim Überfahren aufspringen,
   keine Bestätigungsdialoge für Routine, keine Bereiche, die sich von selbst
@@ -362,7 +375,7 @@ Zwei Regeln, an die sich beide Programme halten:
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v        # 81 Tests, keine Anzeige nötig
+python -m unittest discover -s tests -v        # 92 Tests, keine Anzeige nötig
 
 # GUI-Tests (brauchen tkinter und eine Anzeige)
 xvfb-run -a -s "-screen 0  880x560x24" python tests/smoke_gui_suite.py
