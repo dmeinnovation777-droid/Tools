@@ -13,12 +13,12 @@ Bedienung und Aufbau stehen im [README](README.md).
 | Branding-Pipeline aus dem Vektor-Logo | fertig |
 | Gemeinsames Design-System `dme_ui.py` | fertig |
 | AutoTuner Backup Tool | fertig, 13 Unit-Tests + GUI-Smoke-Test |
-| MHD Lock Tool | fertig, 44 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
+| MHD Lock Tool | fertig, 71 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
 | Starter `dme_suite.py` | fertig, 9 Unit-Tests + GUI-Smoke-Test |
 | Windows-Setup (Inno Setup) + CI-Build | fertig |
 | README, Build-Skripte | fertig |
 
-`python -m unittest discover -s tests` → 66 Tests, grün.
+`python -m unittest discover -s tests` → 104 Tests, grün.
 
 Produktname und Version stehen zentral in `dme_brand.py`
 (`SUITE = "DME Innovation Tools"`, `VERSION = "1.0.0"`); beide Werkzeuge, das
@@ -138,9 +138,35 @@ span     = (rows-1)*row_step + (cols-1)*col_step + element
 `BASEOFFSET` wird nicht geraten: alle Interpretationen werden durchgerechnet und
 die genommen, bei der sämtliche Bereiche in die ROM-Größe passen.
 
+### 3.5 Kunden-Read aus der MHD-App
+
+An einem echten Auftrag (S58, „Mathias S58 Multimap") gegengeprüft:
+
+1. **Kunden schicken den Backup-Read als `<VIN>_<Programm-ID>_mapswitch.bin`**
+   (z. B. `WBS42AY040FR10018_00005C64148205_mapswitch.bin`, 8 MB). Der
+   Handgriff bisher: Datei zu `<Programm-ID>_original.bin` umbenennen. Die
+   Datei aus dem erfolgreichen Arbeitsordner ist **byteidentisch** mit dem
+   Kunden-Read — es ist wirklich nur ein Umbenennen.
+2. **Die Programm-ID steht gepackt in beiden Images** (Read und Tune), das
+   vorhandene ROM-ID-Matching greift also unverändert; die XDF heißt
+   `<Programm-ID>.xdf`. `detect_rom_ids` findet auf diesen MG1-Images zusätzlich
+   den ASCII-Füller `22222222222222` — unschädlich, er steht in beiden Images
+   und wird nur für die Mismatch-Warnung verglichen.
+3. **MHDs eigene Anleitung** (`MHD_Map_Encryption.docx`) empfiehlt als Basis das
+   Original-Bin von MHDs GitHub; der reale, erfolgreiche Workflow verwendet den
+   Kunden-Read als Original. Das Tool bildet den realen Workflow ab.
+
+Umsetzung: `parse_customer_read` liest VIN und Programm-ID aus dem Namen
+(Toleranz für Download-Kopien wie `… (1).bin`), `_mapswitch.bin` ist ein
+Stock-Muster, das Staging benennt den Read in `<ID>_original.bin` um, die VIN
+kommt aus dem Kunden-Dateinamen (Vorrang vor einer alten `_vin.txt`). Die
+Vorprüfung warnt, wenn die VIN vom Kunden-Dateinamen abweicht oder der Read
+versehentlich als Tune gewählt wurde. End-to-End an den Echtdaten geprüft: das
+gestagte Verzeichnis ist deckungsgleich mit dem handgebauten Ordner.
+
 ---
 
-## 3.5 Auslieferung
+## 3.6 Auslieferung
 
 Eine Installationsdatei für den PC:
 `dist\DME-Innovation-Tools-Setup-<version>.exe`, gebaut aus

@@ -16,7 +16,7 @@
 | Tool | Zweck |
 | --- | --- |
 | **AutoTuner Backup Tool** | AutoTuner-Backups (`.zip`/`.bak`) zu einer durchgehenden `.bin` zusammenführen und wieder zurück verpacken |
-| **MHD Lock Tool** | Locken von MHD+ Tune-Files: getunte Datei wählen, VIN eintippen, fertig — Stock-ROM, XDF und Tool-Key findet die App selbst |
+| **MHD Lock Tool** | Locken von MHD+ Tune-Files: getunte Datei wählen, fertig — Stock-ROM, XDF, Tool-Key und VIN findet die App selbst |
 
 Beide laufen mit der Python-Standardbibliothek (nur `tkinter` für die
 Oberfläche) — keine Fremdpakete zur Laufzeit. Die Darstellung ist
@@ -161,13 +161,31 @@ zweite `.toolkey`, eine Datei ohne Änderungen. Genau das fängt dieses Tool ab.
 `.toolkey`. Optional ein Ordner mit XDFs und Stock-ROMs, falls die nicht neben
 den Kundendateien liegen.
 
-**Danach pro Auftrag zwei Eingaben:**
+**Danach pro Auftrag:**
 
-1. **Getunte Datei wählen.** Stock-ROM, XDF und Tool-Key findet die App selbst —
-   siehe unten.
-2. **VIN eintippen.** Wird live geprüft (17 Zeichen, ohne I/O/Q) und automatisch
-   in Großbuchstaben normiert.
+1. **Getunte Datei wählen.** Stock-ROM, XDF, Tool-Key und VIN findet die App
+   selbst — siehe unten.
+2. **VIN prüfen.** Liegt die Kundendatei (`…_mapswitch.bin`) im Ordner, ist die
+   VIN schon eingetragen; sonst eintippen. Wird live geprüft (17 Zeichen, ohne
+   I/O/Q) und automatisch in Großbuchstaben normiert.
 3. **Lock now.**
+
+### Die Datei vom Kunden
+
+Kunden schicken ihren Backup-Read so, wie die MHD-App ihn speichert:
+
+```
+WBS42AY040FR10018_00005C64148205_mapswitch.bin
+└── VIN ─────────┘ └─ Programm-ID ┘
+```
+
+Diese Datei muss **nicht umbenannt werden** — einfach zusammen mit der getunten
+Datei in den Auftragsordner legen. Die App erkennt sie als Original (die
+Programm-ID aus dem Namen wird gegen das getunte Image geprüft), übernimmt die
+VIN aus dem Namen und legt sie im Arbeitsverzeichnis automatisch als
+`00005C64148205_original.bin` ab — exakt die Umbenennung, die man sonst von
+Hand macht. Weicht die eingetippte VIN vom Kundendateinamen ab, warnt die
+Vorprüfung.
 
 ### Wie die App die restlichen Dateien findet
 
@@ -185,12 +203,15 @@ Rückfallregel „die einzige eindeutige Datei im selben Ordner".
 Ein typischer Kundenordner braucht also gar keine Einrichtung:
 
 ```
-00005C6414C808.xdf              ← per ROM-Nummer erkannt
-00005C6414C808_original.bin     ← per ROM-Nummer erkannt
-Gen.toolkey                     ← daneben gefunden
-WBS…_vin.txt                    ← VIN wird übernommen, falls schon vorhanden
-MAP1 E45 MAP2 E30 v4.bin        ← die eine Datei, die du auswählst
+WBS…_00005C6414C808_mapswitch.bin  ← Kundendatei, unverändert: Original + VIN
+00005C6414C808.xdf                 ← per ROM-Nummer erkannt
+Gen.toolkey                        ← daneben gefunden
+MAP1 E45 MAP2 E30 v4.bin           ← die eine Datei, die du auswählst
 ```
+
+Als Original gehen genauso `*_original.bin`, `*_orig.bin`, `*_stock.bin` und
+`*.org`; eine `<VIN>_vin.txt` aus einem früheren Lauf liefert die VIN, falls
+keine Kundendatei da ist.
 
 Was die App ermittelt hat, steht mit Häkchen und Quelle direkt unter der
 Dateiauswahl. Stimmt etwas nicht, klappt **Change manually** die drei Felder auf.
@@ -223,6 +244,7 @@ handgebauten entspricht:
 ```
 00005C6414C808.xdf                  die XDF (genau eine)
 00005C6414C808_original.bin         Stock-ROM, immer auf _original.bin normiert
+                                    (auch aus <VIN>_<ID>_mapswitch.bin)
 MAP1 E45 MAP2 E30 v4.bin            die getunte Datei (Originalname bleibt)
 DMETEST0000000001_vin.txt           leer — die VIN steckt im Dateinamen
 Gen.toolkey                         dein MHD-Schlüssel

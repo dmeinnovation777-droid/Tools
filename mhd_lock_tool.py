@@ -98,7 +98,13 @@ SGBM_RE = re.compile(rb"(?:swfl|btld|swfk)[_-][0-9a-fA-F]{8}")
 _UNSAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 # BMW program id as it appears in file names: 14 hex digits, e.g. 00005C6414C808
 FILE_ID_RE = re.compile(r"(?<![0-9A-Za-z])([0-9A-Fa-f]{14})(?![0-9A-Za-z])")
-STOCK_PATTERNS = ("_original.bin", "_orig.bin", "_stock.bin", ".org")
+STOCK_PATTERNS = ("_original.bin", "_orig.bin", "_stock.bin", ".org", "_mapswitch.bin")
+# The MHD app names a customer's backup read <VIN>_<program id>_mapswitch.bin —
+# the file the customer sends already carries VIN and program id. The trailer
+# tolerates download copies ("…_mapswitch (1).bin", "…_mapswitch - Kopie.bin").
+CUSTOMER_READ_RE = re.compile(
+    r"^([A-HJ-NPR-Z0-9]{17})_([0-9A-F]{14})_mapswitch(?:[\s_\-(.].*)?$",
+    re.IGNORECASE)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -227,6 +233,21 @@ def ids_in_name(path: str) -> list[str]:
     return [match.group(1).upper() for match in FILE_ID_RE.finditer(stem)]
 
 
+def parse_customer_read(path: str) -> tuple[str, str]:
+    """
+    (VIN, program id) from a customer's MHD backup read, ("", "") otherwise.
+
+    Customers send the read exactly as the MHD app saves it:
+    <VIN>_<program id>_mapswitch.bin. That name is the metadata — the VIN does
+    not have to be typed and the file does not have to be renamed by hand.
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    match = CUSTOMER_READ_RE.match(stem)
+    if not match:
+        return "", ""
+    return match.group(1).upper(), match.group(2).upper()
+
+
 def id_in_image(data: bytes, identifier: str) -> bool:
     """
     True when the program id is present in the ROM.
@@ -301,6 +322,10 @@ def _files_in(folders, predicate) -> list[str]:
 def _is_stock_name(name: str) -> bool:
     lower = name.lower()
     return any(lower.endswith(pattern) for pattern in STOCK_PATTERNS)
+
+
+def _is_customer_read(name: str) -> bool:
+    return name.lower().endswith(".bin") and parse_customer_read(name)[1] != ""
 
 
 def resolve_inputs(tuned_path: str, library_dir: str = "", toolkey: str = "",
@@ -388,14 +413,30 @@ def resolve_inputs(tuned_path: str, library_dir: str = "", toolkey: str = "",
                 result.toolkey = local[0]
                 result.sources["toolkey"] = "found next to the files"
 
-    # ── VIN, if the folder was used before ──────────────────────────────────
-    for path in _files_in([own_folder], lambda n: n.lower().endswith(VIN_SUFFIX)):
-        candidate = os.path.basename(path)[: -len(VIN_SUFFIX)]
-        ok, vin, _ = validate_vin(candidate)
-        if ok:
-            result.vin = vin
-            result.sources["vin"] = "from the folder"
-            break
+    # ── VIN ─────────────────────────────────────────────────────────────────
+    # The customer's read (<VIN>_<program id>_mapswitch.bin) is the authority;
+    # a <VIN>_vin.txt left behind by an earlier run is only the fallback.
+    read_vin, _ = parse_customer_read(result.stock) if result.stock else ("", "")
+    if read_vin:
+        result.vin = read_vin
+        result.sources["vin"] = "from the customer's read"
+    else:
+        vins = sorted({parse_customer_read(p)[0]
+                       for p in _files_in([own_folder], _is_customer_read)} - {""})
+        if len(vins) == 1:
+            result.vin = vins[0]
+            result.sources["vin"] = "from the customer's read"
+        elif len(vins) > 1:
+            result.notes.append(f"{len(vins)} customer reads with different VINs "
+                                f"in the folder - check the VIN carefully.")
+    if not result.vin:
+        for path in _files_in([own_folder], lambda n: n.lower().endswith(VIN_SUFFIX)):
+            candidate = os.path.basename(path)[: -len(VIN_SUFFIX)]
+            ok, vin, _ = validate_vin(candidate)
+            if ok:
+                result.vin = vin
+                result.sources["vin"] = "from the folder"
+                break
 
     return result
 
@@ -649,6 +690,17 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
         report.add("error", "Stock and tuned .bin are the same file.")
         has_tuned = False
 
+    if has_tuned and parse_customer_read(job.tuned_bin)[1]:
+        report.add("warn", "The tuned .bin is named like a customer's backup read "
+                           "(*_mapswitch.bin) — is this really the tune?")
+    if has_stock and ok_vin:
+        read_vin, _ = parse_customer_read(job.stock_bin)
+        if read_vin and read_vin != vin:
+            report.add("warn", f"VIN differs from the customer's read ({read_vin}) — "
+                               f"the .mhd will only flash on {vin}.")
+        elif read_vin:
+            report.add("info", "VIN matches the customer's read.")
+
     stock = tuned = b""
     if has_stock:
         stock = read_bytes(job.stock_bin)
@@ -717,8 +769,12 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
 # Staging — a clean directory the builder cannot misread
 # ─────────────────────────────────────────────────────────────────────────────
 def stock_staged_name(path: str) -> str:
+    _vin, read_id = parse_customer_read(path)
+    if read_id:
+        # the manual rename, automated: the customer's read becomes <id>_original.bin
+        return f"{read_id}{STOCK_SUFFIX}"
     stem = os.path.splitext(os.path.basename(path))[0]
-    for suffix in ("_original", "_orig", "_stock", "_stk"):
+    for suffix in ("_original", "_orig", "_stock", "_stk", "_mapswitch"):
         if stem.lower().endswith(suffix):
             stem = stem[:-len(suffix)]
             break
@@ -1124,7 +1180,8 @@ class MhdLockTool(_TkBase):
     NAV = [
         {"key": "lock", "label": "Lock", "title": "Lock a tune",
          "subtitle": "Pick the customer's tuned file — stock ROM, XDF and tool key are "
-                     "found automatically. Check the VIN, press Lock. That is all."},
+                     "found automatically, the VIN comes from the customer's mapswitch "
+                     "read. Check the VIN, press Lock. That is all."},
         {"key": "batch", "label": "Batch", "title": "Batch",
          "subtitle": "Lock a whole queue in one go. Stock ROM and XDF are resolved per "
                      "file, and every job runs in its own clean folder."},
@@ -1268,6 +1325,10 @@ class MhdLockTool(_TkBase):
         if path:
             self._manual.add(key)
             variable.set(path)
+            if key == "stock" and not self.var_vin.get().strip():
+                vin, _ = parse_customer_read(path)
+                if vin:
+                    self.var_vin.set(vin)   # the customer's read carries the VIN
             self._schedule_preflight()
 
     def _on_tuned_changed(self):

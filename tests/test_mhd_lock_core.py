@@ -75,6 +75,40 @@ class TestVin(unittest.TestCase):
         self.assertFalse(m.validate_vin("")[0])
 
 
+class TestCustomerRead(unittest.TestCase):
+    """Customers send <VIN>_<program id>_mapswitch.bin — the name is the metadata."""
+
+    def test_parses_vin_and_program_id(self):
+        vin, rom_id = m.parse_customer_read(
+            "/x/WBS42AY040FR10018_00005C64148205_mapswitch.bin")
+        self.assertEqual(vin, "WBS42AY040FR10018")
+        self.assertEqual(rom_id, "00005C64148205")
+
+    def test_case_is_normalised(self):
+        vin, rom_id = m.parse_customer_read(
+            "/x/wbs42ay040fr10018_00005c64148205_MapSwitch.bin")
+        self.assertEqual(vin, "WBS42AY040FR10018")
+        self.assertEqual(rom_id, "00005C64148205")
+
+    def test_download_copies_still_parse(self):
+        for name in ("WBS42AY040FR10018_00005C64148205_mapswitch (1).bin",
+                     "WBS42AY040FR10018_00005C64148205_mapswitch - Kopie.bin",
+                     "WBS42AY040FR10018_00005C64148205_mapswitch.backup.bin"):
+            self.assertEqual(m.parse_customer_read(name)[1], "00005C64148205", name)
+
+    def test_rejects_everything_else(self):
+        for name in ("00005C64148205_original.bin",          # already renamed
+                     "00005C64148205_mapswitch.bin",         # no VIN
+                     "WBS42AY040FR1001_00005C64148205_mapswitch.bin",   # VIN too short
+                     "WBS42AY040FR100I8_00005C64148205_mapswitch.bin",  # forbidden I
+                     "WBS42AY040FR10018_00005C6414820_mapswitch.bin",   # id too short
+                     "WBS42AY040FR10018_00005C6414820Z_mapswitch.bin",  # id not hex
+                     "WBS42AY040FR10018_00005C64148205_backup.bin",     # wrong suffix
+                     "WBS42AY040FR10018_00005C64148205_mapswitchX.bin", # glued trailer
+                     "tune v2.bin"):
+            self.assertEqual(m.parse_customer_read(name), ("", ""), name)
+
+
 class TestDiff(unittest.TestCase):
     def test_finds_single_region(self):
         stock = bytes(64)
@@ -226,6 +260,36 @@ class TestPreflight(unittest.TestCase):
         self.assertFalse(report.ok)
         self.assertTrue(any("toolkey" in i.text.lower() for i in report.errors))
 
+    def test_vin_is_checked_against_the_customer_read(self):
+        read = write(os.path.join(self.tmp.name,
+                                  "WBS42AY040FR10018_00005C64148205_mapswitch.bin"),
+                     bytes(0x1000))
+        self.job.stock_bin = read
+        self.job.vin = "WBS42AY040FR10018"
+        report = m.preflight(self.job)
+        self.assertTrue(report.ok, [str(i) for i in report.issues])
+        self.assertTrue(any("matches the customer's read" in i.text
+                            for i in report.issues))
+
+    def test_vin_mismatch_with_the_customer_read_warns(self):
+        read = write(os.path.join(self.tmp.name,
+                                  "WBS42AY040FR10018_00005C64148205_mapswitch.bin"),
+                     bytes(0x1000))
+        self.job.stock_bin = read
+        report = m.preflight(self.job)          # job VIN is DMETEST0000000001
+        self.assertTrue(report.ok)               # a warning, not a blocker
+        self.assertTrue(any("differs from the customer's read" in i.text
+                            for i in report.warnings))
+
+    def test_customer_read_picked_as_tune_warns(self):
+        read = write(os.path.join(self.tmp.name,
+                                  "WBS42AY040FR10018_00005C64148205_mapswitch.bin"),
+                     b"\x01" * 0x1000)
+        self.job.tuned_bin = read
+        report = m.preflight(self.job)
+        self.assertTrue(any("is this really the tune" in i.text
+                            for i in report.warnings))
+
     def test_changes_outside_the_xdf_are_reported_but_not_fatal(self):
         tuned = bytearray(0x1000)
         tuned[0x500:0x508] = b"\xAA" * 8            # no table there
@@ -275,6 +339,25 @@ class TestStaging(unittest.TestCase):
         self.assertEqual(m.stock_staged_name("/x/00005C64_original.bin"),
                          "00005C64_original.bin")
         self.assertEqual(m.stock_staged_name("/x/rom_stock.bin"), "rom_original.bin")
+
+    def test_customer_read_is_staged_like_the_manual_rename(self):
+        # <VIN>_<id>_mapswitch.bin becomes <id>_original.bin — the by-hand convention
+        self.assertEqual(
+            m.stock_staged_name("/x/WBS42AY040FR10018_00005C64148205_mapswitch.bin"),
+            "00005C64148205_original.bin")
+        self.assertEqual(m.stock_staged_name("/x/00005C64148205_mapswitch.bin"),
+                         "00005C64148205_original.bin")
+
+    def test_customer_read_stages_a_complete_folder(self):
+        read = write(os.path.join(self.tmp.name,
+                                  "WBS42AY040FR10018_00005C6414C808_mapswitch.bin"),
+                     bytes(64))
+        self.job.stock_bin = read
+        workdir = os.path.join(self.tmp.name, "work3")
+        manifest = m.stage_job(self.job, workdir)
+        self.assertEqual(manifest["stock"], "00005C6414C808_original.bin")
+        self.assertIn("00005C6414C808_original.bin", os.listdir(workdir))
+        self.assertNotIn(os.path.basename(read), os.listdir(workdir))
 
     def test_tuned_never_collides_with_the_stock_glob(self):
         name = m.tuned_staged_name("/x/00005C64_original.bin", "00005C64_original.bin")
@@ -524,6 +607,36 @@ class TestAutomaticResolution(unittest.TestCase):
     def test_vin_is_reused_from_a_previous_run(self):
         write(os.path.join(self.car, "DMETEST0000000001_vin.txt"), "")
         self.assertEqual(m.resolve_inputs(self.tuned).vin, "DMETEST0000000001")
+
+    def test_customer_read_is_the_stock_and_brings_the_vin(self):
+        """The file exactly as the customer sends it — no renaming, no typing."""
+        read = os.path.join(self.car, f"WBS42AY040FR10018_{self.ROM_ID}_mapswitch.bin")
+        os.replace(self.stock, read)
+        found = m.resolve_inputs(self.tuned)
+        self.assertEqual(found.stock, read)
+        self.assertEqual(found.source("stock"), "matched by ROM id")
+        self.assertEqual(found.vin, "WBS42AY040FR10018")
+        self.assertEqual(found.source("vin"), "from the customer's read")
+        self.assertEqual(found.rom_id, self.ROM_ID)
+        self.assertTrue(found.complete)
+
+    def test_customer_read_vin_beats_a_leftover_vin_txt(self):
+        read = os.path.join(self.car, f"WBS42AY040FR10018_{self.ROM_ID}_mapswitch.bin")
+        os.replace(self.stock, read)
+        write(os.path.join(self.car, "DMETEST0000000001_vin.txt"), "")
+        self.assertEqual(m.resolve_inputs(self.tuned).vin, "WBS42AY040FR10018")
+
+    def test_two_reads_with_different_vins_force_a_manual_vin(self):
+        # foreign id, wrong size: neither read can become the stock ROM
+        os.remove(self.stock)
+        write(os.path.join(self.car, "WBS42AY040FR10018_00001A841D1401_mapswitch.bin"),
+              bytes(0x1000))
+        write(os.path.join(self.car, "WBS42AY040FR10019_00001A841D1401_mapswitch.bin"),
+              bytes(0x1000))
+        found = m.resolve_inputs(self.tuned)
+        self.assertEqual(found.stock, "")
+        self.assertEqual(found.vin, "")
+        self.assertTrue(any("VIN" in note for note in found.notes))
 
     def test_invalid_vin_file_is_ignored(self):
         write(os.path.join(self.car, "SHORT_vin.txt"), "")
