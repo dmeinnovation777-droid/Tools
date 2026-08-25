@@ -40,8 +40,8 @@ BRAND_PY = ROOT / "dme_brand.py"
 # Brand / UI colours (must match dme_ui.SURFACE / dme_ui.ACCENT)
 AMBER = (255, 170, 0)
 BLACK = (10, 10, 10)
-HEADER_BG = (11, 13, 17)      # dme_ui.SURFACE / dme_brand.HEADER_BG
-OFF_WHITE = (233, 236, 241)   # dme_ui.TEXT
+HEADER_BG = (255, 255, 255)      # dme_ui.SURFACE / dme_brand.HEADER_BG
+INK = (29, 29, 31)            # dme_ui.TEXT - the wordmark on a light header
 
 # Icon sizes baked into the multi-resolution .ico
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
@@ -189,11 +189,11 @@ def main() -> int:
     blobs = {
         "ICON_ICO_B64": ico_data,
         "ICON_PNG_B64": png_bytes(make_icon(dme, 64)),
-        "LOGO_WHITE_B64": png_bytes(recolour(scale_to_height(master, 128), OFF_WHITE)),
+        "LOGO_WHITE_B64": png_bytes(recolour(scale_to_height(master, 128), INK)),
     }
     header_sizes = []
     for height in HEADER_HEIGHTS:
-        wordmark = recolour(scale_to_height(master, height), OFF_WHITE)
+        wordmark = recolour(scale_to_height(master, height), INK)
         plate = Image.new("RGBA", wordmark.size, HEADER_BG + (255,))
         plate.alpha_composite(wordmark)
         blobs[f"LOGO_HEADER_{height}_B64"] = png_bytes(plate.convert("RGB"))

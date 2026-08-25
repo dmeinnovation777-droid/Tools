@@ -306,7 +306,11 @@ _TkBase = tk.Tk if TK_AVAILABLE else object
 class PartRow:
     """One row of the split table, laid out in the shared grid container."""
 
-    COLOURS = ("#FFAA00", "#FF8A3D", "#63A9FF", "#3DDC84", "#C084FC", "#F472B6")
+    # Six categories on a light ground. Checked with the palette validator:
+    # every adjacent pair separates for normal and colour-blind vision, and
+    # each clears 3:1 against the card it sits on. The first is the brand
+    # amber darkened, because amber itself carries only 1.9:1 on white.
+    COLOURS = ("#A66A00", "#0071E3", "#1B7F49", "#C4271F", "#6D4AAF", "#AD4570")
 
     def __init__(self, table, name="", size=0, on_change=None, on_delete=None):
         self.table = table

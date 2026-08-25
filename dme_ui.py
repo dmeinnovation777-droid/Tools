@@ -19,33 +19,37 @@ from tkinter import font as tkfont
 # ─────────────────────────────────────────────────────────────────────────────
 # Palette
 # ─────────────────────────────────────────────────────────────────────────────
-BG = "#0F1115"          # working canvas
-SURFACE = "#0B0D11"     # sidebar (must match dme_brand.HEADER_BG)
-CARD = "#171A20"        # elevated surface
-CARD_ALT = "#1E222A"    # nested rows, table headers
-HOVER = "#232830"       # hover fill
-BORDER = "#23272F"      # hairline, barely there
-BORDER_SOFT = "#1A1D23"
-FIELD = "#0D0F13"       # input well
-FIELD_BORDER = "#2A2F39"
+BG = "#F5F5F7"          # working canvas
+SURFACE = "#FFFFFF"     # sidebar (must match dme_brand.HEADER_BG)
+CARD = "#FFFFFF"        # raised surface - it reads against BG, not by a border
+CARD_ALT = "#F5F5F7"    # nested rows, table headers
+HOVER = "#EFEFF2"       # hover fill
+BORDER = "#D2D2D7"      # hairline
+BORDER_SOFT = "#E5E5EA"
+FIELD = "#FFFFFF"       # input well
+FIELD_BORDER = "#C7C7CC"
 
-TEXT = "#E9ECF2"
-TEXT_DIM = "#949CA9"
-TEXT_FAINT = "#646C79"
+# Three steps, and all three clear 4.5:1 on both grounds - the faint one carries
+# hints, provenance and table rows, so it is body copy and may not sit below AA.
+TEXT = "#1D1D1F"        # 16.8:1 on white
+TEXT_DIM = "#48484B"    #  8.6:1
+TEXT_FAINT = "#6E6E73"  #  5.1:1
 
-ACCENT = "#FFAA00"      # DME amber
-ACCENT_HOVER = "#FFC24D"
-ACCENT_PRESS = "#DE9400"
-ON_ACCENT = "#12130F"
+ACCENT = "#FFAA00"      # DME amber. On light it fills, it never sets type.
+ACCENT_HOVER = "#F0A000"
+ACCENT_PRESS = "#D99000"
+ON_ACCENT = "#1D1D1F"   # 8.8:1 on the amber fill
 
-OK = "#3DDC84"
-OK_BG = "#122A1E"
-ERR = "#FF6B6B"
-ERR_BG = "#2B1719"
-WARN = "#FFC857"
-WARN_BG = "#2B2314"
-INFO = "#63A9FF"
-INFO_BG = "#15212F"
+# Every status pair clears 4.5:1 twice over: against white and against its own
+# tint, so a tone reads whether it sits on a card or inside a banner.
+OK = "#177A44"
+OK_BG = "#E7F4EC"
+ERR = "#B3261E"
+ERR_BG = "#FBEAE9"
+WARN = "#8A5A00"
+WARN_BG = "#FBF1E0"
+INFO = "#0066CC"
+INFO_BG = "#E8F1FD"
 
 _TONE = {
     "ok": (OK, OK_BG),
@@ -122,9 +126,9 @@ def init(root) -> None:
     mono = _pick(root, _MONO_CANDIDATES, "TkFixedFont")
     FONTS.update({
         "title":  (ui, 15, "bold"),
-        "h1":     (ui, 16, "bold"),
+        "h1":     (ui, 20, "bold"),   # the screen title carries the page
         "h1s":    (ui, 12, "bold"),
-        "h2":     (ui, 10, "bold"),
+        "h2":     (ui, 11, "bold"),   # card titles
         "body":   (ui, 10),
         "label":  (ui, 9),
         "small":  (ui, 9),
@@ -297,7 +301,8 @@ class RoundedButton(tk.Canvas):
         self._state = "normal"
         self._font = f(dims["font"])
         self._padx, self._pady = px(dims["padx"]), px(dims["pady"])
-        self._radius = px(7)
+        # a pill, not a rounded box - the radius is half the height, set in _draw
+        self._radius = px(999)
         self._border = spec.get("border")
 
         super().__init__(parent, bg=self._outer, highlightthickness=0, bd=0,
@@ -329,9 +334,23 @@ class RoundedButton(tk.Canvas):
         if w <= 1 or h <= 1:
             return
         fill = self._fill if self._state != "disabled" else CARD_ALT
-        self._shape = self.create_polygon(
-            _round_points(1, 1, w - 1, h - 1, self._radius), smooth=True, splinesteps=24,
-            fill=fill, outline=self._border or fill)
+        outline = self._border or fill
+        radius = max(px(4), min(self._radius, (h - 2) // 2))
+        if self._radius * 2 >= h - 2:      # asked for a pill
+            # A pill. Tk's smooth polygon never quite reaches the asked-for
+            # radius, so the caps are drawn as real half circles instead.
+            cap = h - 2
+            self.create_oval(1, 1, 1 + cap, h - 1, fill=fill, outline=outline,
+                             tags="shape")
+            self.create_oval(w - 1 - cap, 1, w - 1, h - 1, fill=fill,
+                             outline=outline, tags="shape")
+            self.create_rectangle(1 + cap / 2, 1, w - 1 - cap / 2, h - 1,
+                                  fill=fill, outline=fill, tags="shape")
+        else:
+            self.create_polygon(
+                _round_points(1, 1, w - 1, h - 1, radius), smooth=True,
+                splinesteps=24, fill=fill, outline=outline, tags="shape")
+        self._shape = "shape"
         colour = self._fg if self._state != "disabled" else TEXT_FAINT
         self._label = self.create_text(w / 2, h / 2, text=self._text, fill=colour,
                                        font=self._font)
@@ -470,7 +489,7 @@ class Card(tk.Frame):
 
     def __init__(self, parent, title=None, hint=None, bg=CARD, pad=(16, 14)):
         super().__init__(parent, bg=bg, highlightthickness=0, bd=0)
-        round_corners(self, px(12), outer_bg=parent["bg"])
+        round_corners(self, px(18), outer_bg=parent["bg"])
         px_, py = px(pad[0]), px(pad[1])
         self.hint_var = tk.StringVar(value=hint or "")
         if title:
@@ -931,7 +950,7 @@ class ResolvedRow(tk.Frame):
 
 
 class _NavItem(tk.Frame):
-    """One sidebar entry. Active state is a filled pill, not a coloured line."""
+    """One sidebar entry. Selected is a quiet rounded fill, never a coloured bar."""
 
     def __init__(self, parent, label, on_click, bg=SURFACE):
         super().__init__(parent, bg=bg)
@@ -948,7 +967,7 @@ class _NavItem(tk.Frame):
 
     def _enter(self, _=None):
         if not self._active:
-            self._paint(CARD_ALT, TEXT)
+            self._paint(HOVER, TEXT)
 
     def _leave(self, _=None):
         if not self._active:
@@ -963,7 +982,7 @@ class _NavItem(tk.Frame):
 
     def set_active(self, active):
         self._active = active
-        self._paint(CARD if active else self._bg, TEXT if active else TEXT_DIM)
+        self._paint(CARD_ALT if active else self._bg, TEXT if active else TEXT_DIM)
 
 
 class Shell(tk.Frame):
