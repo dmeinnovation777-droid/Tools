@@ -1315,8 +1315,9 @@ class MhdLockTool(_TkBase):
         self.setup_card = ui.Card(page.body, title="One-time setup")
         self.setup_msg = tk.Label(self.setup_card.body, text="", bg=ui.CARD, fg=ui.TEXT_DIM,
                                   font=ui.f("small"), anchor="w", justify="left",
-                                  wraplength=800)
+                                  wraplength=ui.px(800))
         self.setup_msg.pack(fill=tk.X)
+        ui.wrap_to_parent(self.setup_msg)
         ui.button(self.setup_card.body, "Open settings", lambda: self.tabs.select("settings"),
                   variant="secondary", size="sm").pack(anchor="e", pady=(10, 0))
 
@@ -1702,12 +1703,10 @@ class MhdLockTool(_TkBase):
         ui.PathRow(yours.body, "Folder with your XDFs and stock ROMs (optional)",
                    self.var_library,
                    lambda: self._pick_dir(self.var_library, "Select the folder"),
-                   browse_text="Choose…").pack(fill=tk.X)
-        tk.Label(yours.body,
-                 text="Only needed when stock ROM and XDF are not stored next to the "
-                      "tuned file. Subfolders are searched, matched by ROM id.",
-                 bg=ui.CARD, fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w",
-                 justify="left", wraplength=800).pack(fill=tk.X, pady=(6, 0))
+                   browse_text="Choose…",
+                   hint="Only needed when stock ROM and XDF are not stored next to the "
+                        "tuned file. Subfolders are searched, matched by ROM id."
+                   ).pack(fill=tk.X)
 
         output = page.card("Output")
         self.var_cfg_outdir = tk.StringVar()

@@ -132,16 +132,21 @@ class SuiteLauncher(_TkBase):
 
     def _tool_card(self, parent, tool):
         card = ui.Card(parent, title=tool["name"])
-        tk.Label(card.body, text=tool["pitch"], bg=ui.CARD, fg=ui.TEXT,
-                 font=ui.f("body"), anchor="w", justify="left",
-                 wraplength=330).pack(fill=tk.X, pady=(0, 12))
+        pitch = tk.Label(card.body, text=tool["pitch"], bg=ui.CARD, fg=ui.TEXT,
+                         font=ui.f("body"), anchor="w", justify="left",
+                         wraplength=ui.px(330))
+        pitch.pack(fill=tk.X, pady=(0, 12))
+        ui.wrap_to_parent(pitch, minimum=ui.px(150))
         for bullet in tool["bullets"]:
             row = tk.Frame(card.body, bg=ui.CARD)
             row.pack(fill=tk.X, pady=1)
-            tk.Label(row, text="›", bg=ui.CARD, fg=ui.ACCENT,
+            tk.Label(row, text="›", bg=ui.CARD, fg=ui.ACCENT_INK,
                      font=ui.f("small")).pack(side=tk.LEFT, padx=(0, 8), anchor="n")
-            tk.Label(row, text=bullet, bg=ui.CARD, fg=ui.TEXT_DIM, font=ui.f("small"),
-                     anchor="w", justify="left", wraplength=300).pack(side=tk.LEFT, fill=tk.X)
+            text = tk.Label(row, text=bullet, bg=ui.CARD, fg=ui.TEXT_DIM,
+                            font=ui.f("small"), anchor="w", justify="left",
+                            wraplength=ui.px(300))
+            text.pack(side=tk.LEFT, fill=tk.X)
+            ui.wrap_to_parent(text, minimum=ui.px(130), inset=ui.px(26))
 
         available = resolve_tool(tool) is not None
         footer = tk.Frame(card.body, bg=ui.CARD)

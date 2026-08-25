@@ -29,16 +29,20 @@ BORDER_SOFT = "#E5E5EA"
 FIELD = "#FFFFFF"       # input well
 FIELD_BORDER = "#C7C7CC"
 
-# Three steps, and all three clear 4.5:1 on both grounds - the faint one carries
-# hints, provenance and table rows, so it is body copy and may not sit below AA.
+# Three steps. All three clear 4.5:1 on every ground the app can put behind
+# them, HOVER included - the faint one carries hints, provenance and table rows,
+# so it is body copy and may not sit below AA anywhere.
 TEXT = "#1D1D1F"        # 16.8:1 on white
 TEXT_DIM = "#48484B"    #  8.6:1
-TEXT_FAINT = "#6E6E73"  #  5.1:1
+TEXT_FAINT = "#6A6A6F"  #  5.4:1 on white, 4.7:1 on the hover fill
 
-ACCENT = "#FFAA00"      # DME amber. On light it fills, it never sets type.
+# The amber fills, it does not set type: against white it is 1.9:1. Where the
+# brand colour has to be read, ACCENT_INK is the same hue taken down to AA.
+ACCENT = "#FFAA00"
 ACCENT_HOVER = "#F0A000"
 ACCENT_PRESS = "#D99000"
 ON_ACCENT = "#1D1D1F"   # 8.8:1 on the amber fill
+ACCENT_INK = "#9A6300"  # 5.1:1 on white, 4.6:1 on CARD_ALT, 4.5:1 on WARN_BG
 
 # Every status pair clears 4.5:1 twice over: against white and against its own
 # tint, so a tone reads whether it sits on a card or inside a banner.
@@ -57,7 +61,7 @@ _TONE = {
     "warn": (WARN, WARN_BG),
     "info": (INFO, INFO_BG),
     "idle": (TEXT_FAINT, CARD),
-    "busy": (ACCENT, WARN_BG),
+    "busy": (ACCENT_INK, WARN_BG),
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -240,6 +244,29 @@ def round_corners(widget, radius=None, outer_bg=BG):
     widget.bind("<Configure>", place, add="+")
     place()
     return corners
+
+
+def wrap_to_parent(label, minimum=None, inset=None):
+    """Keep a label's wraplength equal to the width it actually gets.
+
+    A fixed wraplength was fine while the surfaces were fixed too. On the card
+    layout the same number clips, because the card is narrower than the window.
+    The Shell subtitle was the first place that needed it; this is that
+    pattern, made reusable.
+
+    ``inset`` is what the label does not get - siblings on the same row plus
+    padding. Pass a callable when that only becomes known once tk has laid out.
+    """
+    floor = px(280) if minimum is None else minimum
+    gap = px(10) if inset is None else inset
+    parent = label.master
+
+    def resize(event):
+        taken = gap() if callable(gap) else gap
+        label.configure(wraplength=max(floor, event.width - taken))
+
+    parent.bind("<Configure>", resize, add="+")
+    return label
 
 
 def hr(parent, bg=BORDER, pady=0, padx=0):
@@ -463,8 +490,9 @@ class PathRow(tk.Frame):
         self.button.pack(side=tk.LEFT, padx=(px(8), 0))
         self.hint_var = tk.StringVar(value=hint or "")
         self.hint = tk.Label(self, textvariable=self.hint_var, bg=bg, fg=TEXT_FAINT,
-                             font=f("small"), anchor="w")
+                             font=f("small"), anchor="w", justify="left")
         self.hint.pack(fill=tk.X, pady=(px(5), 0))
+        wrap_to_parent(self.hint)
 
     def set_hint(self, text, tone="idle"):
         self.hint_var.set(text)
@@ -564,7 +592,7 @@ class Banner(tk.Frame):
         self._icon = tk.Label(inner, text="", bg=OK_BG, fg=OK, font=f("h2"))
         self._icon.pack(side=tk.LEFT, padx=(px(12), px(8)), pady=px(10))
         self._text = tk.Label(inner, text="", bg=OK_BG, fg=TEXT, font=f("small"),
-                              anchor="w", justify="left", wraplength=560)
+                              anchor="w", justify="left", wraplength=px(560))
         self._text.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=px(10))
         self._action = tk.Label(inner, text="", bg=OK_BG, fg=OK, font=f("small"),
                                 cursor="hand2", padx=px(8))
@@ -573,6 +601,12 @@ class Banner(tk.Frame):
                           and self._action_command())
         self._close = icon_button(inner, "✕", self.hide, bg=OK_BG, fg=TEXT_FAINT,
                                   hover_fg=TEXT, hover_bg=OK_BG)
+        # Icon, action link and close button share the row; whatever they take
+        # is not available for the message.
+        wrap_to_parent(self._text, minimum=px(200),
+                       inset=lambda: (self._icon.winfo_width()
+                                      + self._action.winfo_width()
+                                      + self._close.winfo_width() + px(36)))
         self._corners = round_corners(self._wrap, px(10), outer_bg=bg)
         self._visible = False
 
@@ -724,7 +758,7 @@ class LogView(tk.Frame):
     """Read-only monospace output pane with colour tags and auto-hiding bars."""
 
     TAGS = {"ok": OK, "error": ERR, "warn": WARN, "info": INFO,
-            "dim": TEXT_FAINT, "accent": ACCENT}
+            "dim": TEXT_FAINT, "accent": ACCENT_INK}
 
     def __init__(self, parent, height=12, bg=FIELD):
         super().__init__(parent, bg=BORDER, highlightthickness=0, bd=0)
@@ -805,7 +839,7 @@ class Table(tk.Frame):
         self.tree.tag_configure("ok", foreground=OK)
         self.tree.tag_configure("error", foreground=ERR)
         self.tree.tag_configure("warn", foreground=WARN)
-        self.tree.tag_configure("busy", foreground=ACCENT)
+        self.tree.tag_configure("busy", foreground=ACCENT_INK)
         self.tree.tag_configure("dim", foreground=TEXT_FAINT)
 
     def _sync(self, first, last):
@@ -857,10 +891,6 @@ class Page(tk.Frame):
         self.scroll.pack(fill=tk.BOTH, expand=True)
         self.body = tk.Frame(self.scroll.inner, bg=bg)
         self.body.pack(fill=tk.BOTH, expand=True, padx=pad, pady=(18, 8))
-
-    def intro(self, text, wraplength=860):
-        tk.Label(self.body, text=text, bg=self["bg"], fg=TEXT_DIM, font=f("body"),
-                 anchor="w", justify="left", wraplength=wraplength).pack(fill=tk.X, pady=(0, 16))
 
     def card(self, title, hint=None, pady=(0, 14)):
         card = Card(self.body, title=title, hint=hint)
@@ -1035,8 +1065,7 @@ class Shell(tk.Frame):
         self._subtitle = tk.Label(bar, text="", bg=BG, fg=TEXT_DIM, font=f("body"),
                                   anchor="w", justify="left", wraplength=px(720))
         self._subtitle.pack(fill=tk.X, pady=(px(4), 0))
-        bar.bind("<Configure>",
-                 lambda e: self._subtitle.configure(wraplength=max(px(320), e.width - px(8))))
+        wrap_to_parent(self._subtitle, minimum=px(320), inset=px(8))
 
         self.status = StatusBar(main, f"{brand.VENDOR}  ·  {product}")
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
