@@ -111,6 +111,25 @@ class TestBuildFilesStayInSync(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.group(1), brand.VERSION)
 
+    def test_documented_test_count_matches_the_suite(self):
+        """Both files promise a number of tests. Every added test made that
+        promise a little more wrong, three releases in a row."""
+        suite = unittest.defaultTestLoader.discover(os.path.join(ROOT, "tests"))
+
+        def count(item):
+            if isinstance(item, unittest.TestSuite):
+                return sum(count(child) for child in item)
+            return 1
+
+        actual = count(suite)
+        pattern = re.compile(r"(\d+) Tests")
+        for name in ("README.md", "STATUS.md"):
+            claimed = pattern.findall(self.read(name))
+            self.assertTrue(claimed, f"{name} names no test count")
+            for number in claimed:
+                self.assertEqual(int(number), actual,
+                                 f"{name} says {number} tests, the suite has {actual}")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

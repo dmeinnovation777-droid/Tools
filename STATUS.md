@@ -11,14 +11,14 @@ Bedienung und Aufbau stehen im [README](README.md).
 | Teil | Status |
 | --- | --- |
 | Branding-Pipeline aus dem Vektor-Logo | fertig |
-| Gemeinsames Design-System `dme_ui.py` | fertig |
+| Gemeinsames Design-System `dme_ui.py` | fertig, heller Look |
 | AutoTuner Backup Tool | fertig, 24 Unit-Tests + GUI-Smoke-Test |
 | MHD Lock Tool | fertig, 84 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
 | Starter `dme_suite.py` | fertig, 11 Unit-Tests + GUI-Smoke-Test |
 | Windows-Setup (Inno Setup) + CI-Build | fertig |
 | README, Build-Skripte | fertig |
 
-`python -m unittest discover -s tests` → 119 Tests, grün.
+`python -m unittest discover -s tests` → 134 Tests, grün.
 
 Produktname und Version stehen zentral in `dme_brand.py`
 (`SUITE = "DME Innovation Tools"`, `VERSION = "1.4.1"`); beide Werkzeuge, das
@@ -258,7 +258,15 @@ Eine Installationsdatei für den PC:
 
 * **Oberfläche auf Englisch**, Dokumentation auf Deutsch — die Terminologie
   (iflash/dflash, toolkey, XDF, map slot) ist ohnehin englisch. Umstellbar.
+* **Heller Grund, weiße Karten, eine Akzentfarbe.** Der dunkle Look bis
+  einschließlich 1.4.1 steht in der Git-Historie; eine Umschaltmöglichkeit
+  wäre ein eigenes Vorhaben, weil alle Widgets die Farben beim Import lesen.
+  Beide Werkzeuge teilen sich `dme_ui.py`, also wechselt der AutoTuner mit.
 * **Amber `#FFAA00` als einziger Akzent**; das Logo bleibt schwarz/weiß.
+  Auf hellem Grund füllt das Amber nur (Pille, Trennstreifen, Cursor) — als
+  Schriftfarbe trägt es 1,9:1. Dafür gibt es `ACCENT_INK` `#9A6300`, denselben
+  Ton bei 5,1:1. `tests/test_palette.py` rechnet jede Kombination nach und
+  fällt, sobald wieder jemand `fg=ACCENT` schreibt.
 * **Gemeinsame Module statt Einzeldateien**: `dme_ui.py` und `dme_brand.py`
   sorgen dafür, dass beide Tools identisch aussehen. PyInstaller bündelt sie
   automatisch mit.

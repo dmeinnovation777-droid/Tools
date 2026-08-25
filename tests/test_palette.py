@@ -1,6 +1,6 @@
 """The palette has to survive its own maintenance.
 
-Version 1.5.0 moved the suite from a dark ground to a light one. Colours that
+The suite moved from a dark ground to a light one. Colours that
 read fine as white-on-dark can be invisible as dark-on-white: the DME amber
 went from 9.6:1 to 1.9:1 overnight, and it was still setting the type in the
 archive listing. These tests compute the contrast instead of trusting the

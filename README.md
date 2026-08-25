@@ -399,9 +399,18 @@ komplette Palette oben in `dme_ui.py`.
 
 Die Programme tragen links eine feste Navigation, darüber den Namen der
 aktuellen Ansicht mit einer Zeile Erklärung, unten eine Statusleiste und über
-ihr die Aktion, die auf dieser Seite ansteht. Flächen heben sich durch
-Helligkeit voneinander ab statt durch Rahmen, Karten und Knöpfe haben runde
-Ecken.
+ihr die Aktion, die auf dieser Seite ansteht.
+
+Der Grund ist hell (`#F5F5F7`), die Karten sind weiß und großzügig gerundet —
+sie heben sich durch die Fläche ab, nicht durch einen Rahmen. Es gibt genau
+eine Akzentfarbe, das DME-Amber, und sie fällt der Aktion zu, die auf der
+Seite ansteht: die Pille unten rechts. Alles andere ist Grau in drei Stufen.
+Farbe bedeutet hier etwas, deshalb wird sie nicht dekorativ ausgegeben.
+
+Jede Schriftfarbe steht nachgerechnet auf mindestens 4,5:1 gegen jeden Grund,
+auf den sie fallen kann — `tests/test_palette.py` rechnet es bei jedem Lauf
+nach. Das Amber selbst trägt auf Weiß nur 1,9:1; wo die Markenfarbe gelesen
+werden muss, steht eine abgedunkelte Variante desselben Tons.
 
 Dazu zwei Regeln, an die sich beide Programme halten:
 
@@ -415,7 +424,7 @@ Dazu zwei Regeln, an die sich beide Programme halten:
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v        # 119 Tests, keine Anzeige nötig
+python -m unittest discover -s tests -v        # 134 Tests, keine Anzeige nötig
 
 # GUI-Tests (brauchen tkinter und eine Anzeige)
 xvfb-run -a -s "-screen 0  880x560x24" python tests/smoke_gui_suite.py
