@@ -82,6 +82,20 @@ class TestBuildFilesStayInSync(unittest.TestCase):
         self.assertEqual(autotuner_tool.APP_VERSION, brand.VERSION)
         self.assertEqual(mhd_lock_tool.APP_VERSION, brand.VERSION)
 
+    def test_documented_setup_file_name_matches_the_suite(self):
+        """A stale file name here is what the customer reads on the download page."""
+        pattern = re.compile(r"DME-Innovation-Tools-Setup-([0-9]+(?:\.[0-9]+)+)\.exe")
+        for parts in (("README.md",), ("installer", "RELEASE_NOTES.md")):
+            found = pattern.findall(self.read(*parts))
+            self.assertTrue(found, f"{'/'.join(parts)} names no setup file")
+            for version in found:
+                self.assertEqual(version, brand.VERSION, "/".join(parts))
+
+    def test_status_notes_quote_the_current_version(self):
+        match = re.search(r'`VERSION = "([^"]+)"`', self.read("STATUS.md"))
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(1), brand.VERSION)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
