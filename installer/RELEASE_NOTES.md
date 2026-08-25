@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-1.4.1.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-2.0.0.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -18,6 +18,30 @@ Dazu Startmenü-Einträge, auf Wunsch eine Desktop-Verknüpfung und ein Uninstal
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Neu in 2.0.0
+
+**Beide Werkzeuge sehen neu aus.** Heller Grund, weiße Karten mit weichen Ecken,
+und genau eine Farbe im Bild: das DME-Amber. Es gehört der Aktion, die auf der
+Seite gerade ansteht — *Lock now*, *Run batch*, *Open*. Alles andere ist Grau in
+drei Stufen. Wo vorher farbige Kästchen um Aufmerksamkeit konkurrierten, führt
+jetzt genau ein Knopf.
+
+**An der Funktion ändert sich nichts.** Kein Eingriff in das Locken, in das
+Erkennen der Kundendatei, in die XDF-Suche oder in die Übernahme der VIN. Die
+2.0 ist eine Aussage über das Aussehen, nicht über das, was das Programm tut.
+Deine Einstellungen bleiben stehen — sie liegen in `%APPDATA%\DME Innovation`
+und überleben die Aktualisierung.
+
+Dazu zwei Dinge, die man nicht sofort sieht:
+
+* **Jede Schriftfarbe ist nachgerechnet.** Kein Text steht unter dem Kontrast,
+  den man bei Werkstattlicht auf einem billigen Monitor noch sicher liest — auch
+  nicht die kleinen Hinweiszeilen. Ein Test rechnet das bei jeder Änderung nach,
+  damit es so bleibt.
+* **Nichts wird mehr abgeschnitten.** Erklärungen brechen dort um, wo die Karte
+  endet, statt mitten im Wort aufzuhören — bei jeder Fenstergröße und bei
+  125 %, 150 % oder 200 % Windows-Skalierung.
 
 ## Korrekturen in 1.4.1
 
