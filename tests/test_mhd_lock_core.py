@@ -505,10 +505,6 @@ class TestConfig(unittest.TestCase):
                     os.environ["XDG_CONFIG_HOME"] = old
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 class TestRunnerEdgeCases(unittest.TestCase):
     """The builder's exit is messy — these are the cases that decide the verdict."""
 
@@ -627,16 +623,40 @@ class TestAutomaticResolution(unittest.TestCase):
         self.assertEqual(m.resolve_inputs(self.tuned).vin, "WBS42AY040FR10018")
 
     def test_two_reads_with_different_vins_force_a_manual_vin(self):
-        # foreign id, wrong size: neither read can become the stock ROM
+        """Two customers on the same software version, files mixed in one folder."""
         os.remove(self.stock)
-        write(os.path.join(self.car, "WBS42AY040FR10018_00001A841D1401_mapswitch.bin"),
-              bytes(0x1000))
-        write(os.path.join(self.car, "WBS42AY040FR10019_00001A841D1401_mapswitch.bin"),
-              bytes(0x1000))
+        stock = m.read_bytes(self.tuned)
+        for vin in ("WBS42AY040FR10018", "WBS42AY040FR10019"):
+            write(os.path.join(self.car, f"{vin}_{self.ROM_ID}_mapswitch.bin"), stock)
         found = m.resolve_inputs(self.tuned)
-        self.assertEqual(found.stock, "")
-        self.assertEqual(found.vin, "")
-        self.assertTrue(any("VIN" in note for note in found.notes))
+        self.assertEqual(found.vin, "")          # guessing here would lock a wrong car
+        self.assertTrue(any("cannot be guessed" in note for note in found.notes))
+
+    def test_another_customers_read_in_the_library_never_sets_the_vin(self):
+        """A program id names a software version, not a car."""
+        library = os.path.join(self.tmp.name, "library")
+        os.makedirs(library)
+        os.replace(self.stock,
+                   os.path.join(library, f"WBS42AY040FR10018_{self.ROM_ID}_mapswitch.bin"))
+        found = m.resolve_inputs(self.tuned, library_dir=library)
+        self.assertTrue(found.stock.startswith(library))   # usable as the original
+        self.assertEqual(found.vin, "")                    # but it is not this car
+        self.assertEqual(found.source("vin"), "")
+
+    def test_a_leftover_read_from_another_car_is_ignored(self):
+        """Shared inbox folder: last week's read must not supply this VIN."""
+        write(os.path.join(self.car, "WBS42AY040FR10018_00001A841D1401_mapswitch.bin"),
+              bytes(0x2000))
+        self.assertEqual(m.resolve_inputs(self.tuned).vin, "")
+
+    def test_a_download_copy_of_the_read_is_still_the_original(self):
+        copy = os.path.join(self.car,
+                            f"WBS42AY040FR10018_{self.ROM_ID}_mapswitch (1).bin")
+        os.replace(self.stock, copy)
+        found = m.resolve_inputs(self.tuned)
+        self.assertEqual(found.stock, copy)
+        self.assertEqual(found.vin, "WBS42AY040FR10018")
+        self.assertEqual(m.stock_staged_name(copy), f"{self.ROM_ID}_original.bin")
 
     def test_invalid_vin_file_is_ignored(self):
         write(os.path.join(self.car, "SHORT_vin.txt"), "")
@@ -699,3 +719,90 @@ class TestAutomaticResolution(unittest.TestCase):
         found = m.resolve_inputs(os.path.join(self.car, "nope.bin"))
         self.assertFalse(found.complete)
         self.assertTrue(found.notes)
+
+
+class TestXdfLibrary(unittest.TestCase):
+    """A whole MHD XDF pack is handed over as one folder: nested and large."""
+
+    ROM_ID = "00005C6414C808"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.car = os.path.join(self.tmp.name, "Kunde")
+        os.makedirs(self.car)
+        image = bytearray(0x2000)
+        image[0x100:0x107] = bytes.fromhex(self.ROM_ID)
+        write(os.path.join(self.car, f"WBS42AY040FR10018_{self.ROM_ID}_mapswitch.bin"),
+              bytes(image))
+        image[0x800:0x810] = b"\xAA" * 16
+        self.tuned = write(os.path.join(self.car, "Kunde tune v2.bin"), bytes(image))
+        write(os.path.join(self.car, "Gen.toolkey"), b"\x00" * 128)
+        self.library = os.path.join(self.tmp.name, "MHD XDF Pack")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _xdf(self, relative_folder, name):
+        folder = os.path.join(self.library, relative_folder)
+        os.makedirs(folder, exist_ok=True)
+        return write(os.path.join(folder, name), SAMPLE_XDF)
+
+    def test_xdf_is_found_deep_in_the_pack(self):
+        """platform / DME / software version / revision — four levels down."""
+        deep = self._xdf(os.path.join("S58", "MG1CS024", "SW_3.11", "rev_b"),
+                         f"{self.ROM_ID}.xdf")
+        found = m.resolve_inputs(self.tuned, library_dir=self.library)
+        self.assertEqual(found.xdf, deep)
+        self.assertEqual(found.source("xdf"), "matched by ROM id")
+        self.assertTrue(found.complete)
+
+    def test_other_software_versions_are_not_taken(self):
+        self._xdf(os.path.join("S58", "MG1CS024", "SW_1.20"), "00001A841D1401.xdf")
+        self._xdf(os.path.join("S55", "MEVD172G", "SW_2.05"), "00007B1122C304.xdf")
+        right = self._xdf(os.path.join("S58", "MG1CS024", "SW_3.11"),
+                          f"{self.ROM_ID}.xdf")
+        self.assertEqual(m.resolve_inputs(self.tuned, library_dir=self.library).xdf, right)
+
+    def test_two_revisions_of_the_same_rom_take_the_newest(self):
+        old = self._xdf(os.path.join("S58", "rev_a"), f"{self.ROM_ID}.xdf")
+        new = self._xdf(os.path.join("S58", "rev_b"), f"{self.ROM_ID}.xdf")
+        os.utime(old, (1_600_000_000, 1_600_000_000))
+        os.utime(new, (1_700_000_000, 1_700_000_000))
+        found = m.resolve_inputs(self.tuned, library_dir=self.library)
+        self.assertEqual(found.xdf, new)
+        self.assertTrue(any("newest" in note for note in found.notes))
+
+    def test_a_big_library_costs_no_extra_image_scan(self):
+        """The ROM number comes from the customer's read, so names are enough."""
+        for index in range(400):
+            self._xdf(os.path.join("filler", f"batch{index // 50}"),
+                      "%014X.xdf" % (0xAA0000000000 + index))
+        right = self._xdf(os.path.join("S58", "MG1CS024"), f"{self.ROM_ID}.xdf")
+        scans = []
+        original = m.id_in_image
+
+        def counting(data, identifier):
+            scans.append(identifier)
+            return original(data, identifier)
+
+        m.id_in_image = counting
+        try:
+            found = m.resolve_inputs(self.tuned, library_dir=self.library)
+        finally:
+            m.id_in_image = original
+        self.assertEqual(found.xdf, right)
+        # only the customer's read is confirmed against the image
+        self.assertEqual(scans, [self.ROM_ID])
+
+    def test_unknown_rom_stops_and_says_so(self):
+        os.remove(os.path.join(self.car,
+                               f"WBS42AY040FR10018_{self.ROM_ID}_mapswitch.bin"))
+        for index in range(m.CONTENT_SCAN_BUDGET + 20):
+            self._xdf("filler", "%014X.xdf" % (0xBB0000000000 + index))
+        found = m.resolve_inputs(self.tuned, library_dir=self.library)
+        self.assertEqual(found.xdf, "")
+        self.assertTrue(any("Stopped checking" in note for note in found.notes))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

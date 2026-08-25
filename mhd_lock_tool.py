@@ -99,6 +99,14 @@ _UNSAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 # BMW program id as it appears in file names: 14 hex digits, e.g. 00005C6414C808
 FILE_ID_RE = re.compile(r"(?<![0-9A-Za-z])([0-9A-Fa-f]{14})(?![0-9A-Za-z])")
 STOCK_PATTERNS = ("_original.bin", "_orig.bin", "_stock.bin", ".org", "_mapswitch.bin")
+# A whole MHD XDF library is handed over as one folder: platform / DME / software
+# version / … Six levels cover that comfortably.
+LIBRARY_DEPTH = 6
+# Confirming a program id means scanning the 8 MB image, so a library with
+# thousands of XDFs must never be checked file by file. Once the ROM number is
+# known, XDFs are matched by name and no scan happens at all; this budget only
+# caps the fallback where nothing is known yet.
+CONTENT_SCAN_BUDGET = 250
 # The MHD app names a customer's backup read <VIN>_<program id>_mapswitch.bin —
 # the file the customer sends already carries VIN and program id. The trailer
 # tolerates download copies ("…_mapswitch (1).bin", "…_mapswitch - Kopie.bin").
@@ -287,7 +295,7 @@ class Resolution:
         return bool(self.stock and self.xdf and self.toolkey)
 
 
-def _scan_dirs(tuned_path: str, library_dir: str = "", max_depth: int = 3) -> list[str]:
+def _scan_dirs(tuned_path: str, library_dir: str = "", max_depth: int = LIBRARY_DEPTH) -> list[str]:
     """The tuned file's own folder first, then the library, breadth limited."""
     folders: list[str] = []
     own = os.path.dirname(os.path.abspath(tuned_path))
@@ -319,17 +327,64 @@ def _files_in(folders, predicate) -> list[str]:
     return found
 
 
-def _is_stock_name(name: str) -> bool:
-    lower = name.lower()
-    return any(lower.endswith(pattern) for pattern in STOCK_PATTERNS)
-
-
 def _is_customer_read(name: str) -> bool:
     return name.lower().endswith(".bin") and parse_customer_read(name)[1] != ""
 
 
+def _is_stock_name(name: str) -> bool:
+    lower = name.lower()
+    if any(lower.endswith(pattern) for pattern in STOCK_PATTERNS):
+        return True
+    # download copies of a read ("… (1).bin", "… - Kopie.bin") are originals too
+    return _is_customer_read(name)
+
+
+def _newest(paths: list[str]) -> str:
+    """Several files for the same ROM: the most recent one is the current XDF."""
+    try:
+        return max(paths, key=os.path.getmtime)
+    except OSError:
+        return paths[0]
+
+
+class _IdLookup:
+    """
+    'Is this program id really in the image?' — asked once per id, not per file.
+
+    Each answer costs a scan of an 8 MB image, and a full MHD XDF library holds
+    thousands of candidates. Caching keeps a re-check cheap; the budget keeps the
+    window responsive when nothing matches at all.
+    """
+
+    def __init__(self, data: bytes, budget: int = CONTENT_SCAN_BUDGET):
+        self.data = data
+        self.budget = budget
+        self.exhausted = False
+        self._known: dict[str, bool] = {}
+
+    def has(self, identifier: str) -> bool:
+        cached = self._known.get(identifier)
+        if cached is not None:
+            return cached
+        if self.budget <= 0:
+            self.exhausted = True
+            return False
+        self.budget -= 1
+        answer = id_in_image(self.data, identifier)
+        self._known[identifier] = answer
+        return answer
+
+    def first_match(self, paths) -> tuple[str, str]:
+        """(path, id) of the first candidate whose name id occurs in the image."""
+        for path in paths:
+            for identifier in ids_in_name(path):
+                if self.has(identifier):
+                    return path, identifier
+        return "", ""
+
+
 def resolve_inputs(tuned_path: str, library_dir: str = "", toolkey: str = "",
-                   max_depth: int = 3) -> Resolution:
+                   max_depth: int = LIBRARY_DEPTH) -> Resolution:
     """
     Work out stock ROM, XDF, tool key and VIN from the tuned file alone.
 
@@ -347,18 +402,12 @@ def resolve_inputs(tuned_path: str, library_dir: str = "", toolkey: str = "",
     own_folder = os.path.dirname(os.path.abspath(tuned_path))
     folders = _scan_dirs(tuned_path, library_dir, max_depth)
 
-    def by_id(paths):
-        """(path, id) for candidates whose name id occurs in the tuned image."""
-        for path in paths:
-            for identifier in ids_in_name(path):
-                if id_in_image(data, identifier):
-                    return path, identifier
-        return None, ""
+    lookup = _IdLookup(data)
 
     # ── stock ROM ───────────────────────────────────────────────────────────
     stock_candidates = [p for p in _files_in(folders, _is_stock_name)
                         if os.path.abspath(p) != os.path.abspath(tuned_path)]
-    stock, rom_id = by_id(stock_candidates)
+    stock, rom_id = lookup.first_match(stock_candidates)
     if stock:
         result.sources["stock"] = "matched by ROM id"
     else:
@@ -378,25 +427,38 @@ def resolve_inputs(tuned_path: str, library_dir: str = "", toolkey: str = "",
             rom_id = ids[0] if ids else ""
 
     # ── XDF ─────────────────────────────────────────────────────────────────
+    # With the ROM number already established the whole MHD XDF library is
+    # matched by name — no further pass over the image, however big the library.
     xdf_candidates = _files_in(folders, lambda n: n.lower().endswith(XDF_EXT))
-    xdf, xdf_id = by_id(xdf_candidates)
-    if xdf:
-        result.sources["xdf"] = "matched by ROM id"
-        rom_id = rom_id or xdf_id
-    else:
+    xdf = ""
+    if rom_id:
+        named = [p for p in xdf_candidates if rom_id in ids_in_name(p)]
+        if named:
+            xdf = _newest(named)
+            result.sources["xdf"] = "matched by ROM id"
+            if len(named) > 1:
+                result.notes.append(f"{len(named)} XDFs for ROM {rom_id} in the library - "
+                                    f"using the newest ({os.path.basename(xdf)}).")
+    if not xdf:
+        xdf, xdf_id = lookup.first_match(xdf_candidates)
+        if xdf:
+            result.sources["xdf"] = "matched by ROM id"
+            rom_id = rom_id or xdf_id
+    if not xdf:
         local = [p for p in xdf_candidates if os.path.dirname(p) == own_folder]
         if len(local) == 1:
             xdf = local[0]
             result.sources["xdf"] = "only XDF in the folder"
         elif len(local) > 1:
             result.notes.append(f"{len(local)} XDFs in the folder - pick one under Details.")
-        elif rom_id:
-            named = [p for p in xdf_candidates if rom_id in [i.upper() for i in ids_in_name(p)]]
-            if len(named) == 1:
-                xdf = named[0]
-                result.sources["xdf"] = "matched by ROM id"
     result.xdf = xdf or ""
     result.rom_id = rom_id
+
+    if lookup.exhausted and not (result.stock and result.xdf):
+        result.notes.append(f"Stopped checking after {CONTENT_SCAN_BUDGET} files - the "
+                            f"library is large and the ROM number is still unknown. Point "
+                            f"the library at the XDF folder itself, or pick the files "
+                            f"under Details.")
 
     # ── tool key ────────────────────────────────────────────────────────────
     if toolkey and os.path.isfile(toolkey):
@@ -414,21 +476,21 @@ def resolve_inputs(tuned_path: str, library_dir: str = "", toolkey: str = "",
                 result.sources["toolkey"] = "found next to the files"
 
     # ── VIN ─────────────────────────────────────────────────────────────────
-    # The customer's read (<VIN>_<program id>_mapswitch.bin) is the authority;
-    # a <VIN>_vin.txt left behind by an earlier run is only the fallback.
-    read_vin, _ = parse_customer_read(result.stock) if result.stock else ("", "")
-    if read_vin:
-        result.vin = read_vin
+    # A VIN is only ever taken from a read that belongs to THIS job: it has to
+    # sit next to the tuned file and carry this ROM's program id. A program id
+    # names a software version, not a car — an archived read from another
+    # customer on the same version would otherwise lock the .mhd to their car.
+    vins = set()
+    for path in _files_in([own_folder], _is_customer_read):
+        read_vin, read_id = parse_customer_read(path)
+        if read_vin and (read_id == rom_id or lookup.has(read_id)):
+            vins.add(read_vin)
+    if len(vins) == 1:
+        result.vin = vins.pop()
         result.sources["vin"] = "from the customer's read"
-    else:
-        vins = sorted({parse_customer_read(p)[0]
-                       for p in _files_in([own_folder], _is_customer_read)} - {""})
-        if len(vins) == 1:
-            result.vin = vins[0]
-            result.sources["vin"] = "from the customer's read"
-        elif len(vins) > 1:
-            result.notes.append(f"{len(vins)} customer reads with different VINs "
-                                f"in the folder - check the VIN carefully.")
+    elif len(vins) > 1:
+        result.notes.append(f"{len(vins)} customer reads with different VINs in the "
+                            f"folder - type the right VIN, it cannot be guessed.")
     if not result.vin:
         for path in _files_in([own_folder], lambda n: n.lower().endswith(VIN_SUFFIX)):
             candidate = os.path.basename(path)[: -len(VIN_SUFFIX)]
@@ -693,7 +755,11 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
     if has_tuned and parse_customer_read(job.tuned_bin)[1]:
         report.add("warn", "The tuned .bin is named like a customer's backup read "
                            "(*_mapswitch.bin) — is this really the tune?")
-    if has_stock and ok_vin:
+    # Only a read filed with this job says anything about this car; one pulled
+    # from the library belongs to whoever sent it.
+    if has_stock and has_tuned and ok_vin and \
+            os.path.dirname(os.path.abspath(job.stock_bin)) == \
+            os.path.dirname(os.path.abspath(job.tuned_bin)):
         read_vin, _ = parse_customer_read(job.stock_bin)
         if read_vin and read_vin != vin:
             report.add("warn", f"VIN differs from the customer's read ({read_vin}) — "
@@ -1169,6 +1235,9 @@ class MhdLockTool(_TkBase):
         self._stop_event = threading.Event()
         self._preflight_after = None
         self._manual: set[str] = set()
+        self._job_folder = ""       # which customer folder the VIN belongs to
+        self._vin_auto = False      # VIN was resolved, not typed - may be corrected
+        self._setting_vin = False
         self._xdf_cache: tuple[str, float, XdfDefinition] | None = None
 
         self._build()
@@ -1307,6 +1376,8 @@ class MhdLockTool(_TkBase):
         if clean != raw:
             self.var_vin.set(clean)   # re-enters once, then raw == clean
             return
+        if not self._setting_vin:
+            self._vin_auto = False    # typed by hand: the app stops correcting it
         self._schedule_preflight()
 
     # ── automatic resolution ─────────────────────────────────────────────────
@@ -1333,7 +1404,22 @@ class MhdLockTool(_TkBase):
 
     def _on_tuned_changed(self):
         self._manual.clear()          # a new car starts from scratch
+        # Another folder is another customer: a VIN must never survive that move.
+        # Within one folder it stays, so a second tune version costs no retyping.
+        folder = os.path.dirname(os.path.abspath(self.var_tuned.get().strip()))
+        if folder != self._job_folder:
+            self._job_folder = folder
+            self._set_vin("")
+            self._vin_auto = False
         self._schedule_preflight()
+
+    def _set_vin(self, value: str):
+        """Fill the VIN field without it counting as typed."""
+        self._setting_vin = True
+        try:
+            self.var_vin.set(value)
+        finally:
+            self._setting_vin = False
 
     def _resolve_and_check(self, force=False):
         """Derive every companion file from the tuned ROM, then run the checks."""
@@ -1365,8 +1451,12 @@ class MhdLockTool(_TkBase):
         for key in ("stock", "xdf", "toolkey"):
             if key not in self._manual:
                 getattr(self, f"var_{key}").set(getattr(found, key))
-        if found.vin and not self.var_vin.get().strip():
-            self.var_vin.set(found.vin)
+        # A resolved VIN fills an empty field and corrects an earlier resolved one;
+        # a VIN typed by hand is left alone (pre-flight warns if it disagrees).
+        if found.vin and (self._vin_auto or not self.var_vin.get().strip()):
+            if found.vin != self.var_vin.get():
+                self._set_vin(found.vin)
+            self._vin_auto = True
         if found.rom_id:
             self._step1.set_hint(f"ROM {found.rom_id}", "ok")
 
@@ -2016,9 +2106,12 @@ class MhdLockTool(_TkBase):
             return
         base = self._current_job()
         unresolved = 0
+        inherited = 0
         for path in paths:
             found = resolve_inputs(path, self.config_data.get("library_dir", ""),
                                    self.config_data.get("toolkey", ""))
+            if not found.vin and base.vin:
+                inherited += 1
             job = LockJob(
                 customer=os.path.splitext(os.path.basename(path))[0],
                 vin=found.vin or base.vin,
@@ -2036,6 +2129,11 @@ class MhdLockTool(_TkBase):
         if unresolved:
             self.batch_log.write(f" ! {unresolved} job(s) without a stock ROM or XDF - "
                                  f"set a library folder in Settings.", "warn", follow=True)
+        if inherited:
+            # one VIN across several cars locks them all to the first one
+            self.batch_log.write(f" ! {inherited} job(s) carry no VIN of their own and "
+                                 f"took {base.vin} from the Lock tab - check the VIN "
+                                 f"column row by row.", "warn", follow=True)
         missing_vin = [j for j in self.batch_jobs if not validate_vin(j.vin)[0]]
         if missing_vin:
             self.batch_log.write(f" ! {len(missing_vin)} job(s) still need a VIN - select a "

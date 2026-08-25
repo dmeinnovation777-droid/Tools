@@ -12,13 +12,13 @@ Bedienung und Aufbau stehen im [README](README.md).
 | --- | --- |
 | Branding-Pipeline aus dem Vektor-Logo | fertig |
 | Gemeinsames Design-System `dme_ui.py` | fertig |
-| AutoTuner Backup Tool | fertig, 13 Unit-Tests + GUI-Smoke-Test |
-| MHD Lock Tool | fertig, 71 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
+| AutoTuner Backup Tool | fertig, 24 Unit-Tests + GUI-Smoke-Test |
+| MHD Lock Tool | fertig, 79 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
 | Starter `dme_suite.py` | fertig, 9 Unit-Tests + GUI-Smoke-Test |
 | Windows-Setup (Inno Setup) + CI-Build | fertig |
 | README, Build-Skripte | fertig |
 
-`python -m unittest discover -s tests` → 104 Tests, grün.
+`python -m unittest discover -s tests` → 112 Tests, grün.
 
 Produktname und Version stehen zentral in `dme_brand.py`
 (`SUITE = "DME Innovation Tools"`, `VERSION = "1.0.0"`); beide Werkzeuge, das
@@ -157,16 +157,43 @@ An einem echten Auftrag (S58, „Mathias S58 Multimap") gegengeprüft:
    Kunden-Read als Original. Das Tool bildet den realen Workflow ab.
 
 Umsetzung: `parse_customer_read` liest VIN und Programm-ID aus dem Namen
-(Toleranz für Download-Kopien wie `… (1).bin`), `_mapswitch.bin` ist ein
-Stock-Muster, das Staging benennt den Read in `<ID>_original.bin` um, die VIN
-kommt aus dem Kunden-Dateinamen (Vorrang vor einer alten `_vin.txt`). Die
-Vorprüfung warnt, wenn die VIN vom Kunden-Dateinamen abweicht oder der Read
+(Toleranz für Download-Kopien wie `… (1).bin`, die über `_is_stock_name` auch
+als Original gelten), das Staging benennt den Read in `<ID>_original.bin` um.
+Die Vorprüfung warnt, wenn die VIN vom Kunden-Dateinamen abweicht oder der Read
 versehentlich als Tune gewählt wurde. End-to-End an den Echtdaten geprüft: das
 gestagte Verzeichnis ist deckungsgleich mit dem handgebauten Ordner.
 
+**Woher die VIN kommen darf.** Eine Programm-ID benennt einen Softwarestand,
+kein Auto — zwei Kunden auf demselben Stand teilen sie sich. Eine automatisch
+gesetzte VIN wird deshalb nur akzeptiert, wenn der Read **neben der getunten
+Datei liegt** *und* seine Programm-ID zu diesem ROM gehört. Ein archivierter
+Read aus dem Bibliotheksordner taugt damit weiterhin als Original, liefert aber
+nie die VIN; liegen zwei Reads mit verschiedenen VINs im Auftragsordner, bleibt
+das Feld leer und die Notiz sagt, dass hier nichts zu raten ist. Ebenso setzt
+eine neue getunte Datei die VIN in der Oberfläche zurück, und Batch-Jobs erben
+keine VIN vom vorherigen Auftrag. Alles andere könnte eine `.mhd` auf das
+falsche Auto locken, ohne dass es jemand merkt.
+
+### 3.6 Die XDF-Bibliothek als Ganzes
+
+Der komplette MHD-XDF-Ordner (Plattform / DME / Softwarestand / Revision) wird
+unter *Settings* als Bibliothek eingetragen; `LIBRARY_DEPTH = 6` deckt diese
+Schachtelung ab. Entscheidend ist die Reihenfolge: **erst die ROM-Nummer, dann
+die XDF.** Ist die Nummer aus dem Kunden-Read bekannt, wird die XDF rein über
+den Dateinamen gefunden — kein weiterer Durchlauf durch das 8-MB-Image. Vorher
+kostete jede Kandidatendatei einen eigenen Scan: gemessen 10,4 ms pro Datei,
+also rund 21 s bei 2000 XDFs, und das im GUI-Thread. Jetzt sind es 0,07 s bei
+2161 XDFs, die richtige Datei vier Ebenen tief.
+
+Bleibt die ROM-Nummer unbekannt (kein Original im Auftragsordner), greift der
+inhaltliche Abgleich weiter, aber gedeckelt durch `CONTENT_SCAN_BUDGET = 250`
+(~2,7 s) mit einer Notiz statt einer hängenden Oberfläche. Gibt es mehrere XDFs
+zu derselben ROM-Nummer, gewinnt die neueste (`_newest`) und die Notiz nennt
+die gewählte Datei.
+
 ---
 
-## 3.6 Auslieferung
+## 4. Auslieferung
 
 Eine Installationsdatei für den PC:
 `dist\DME-Innovation-Tools-Setup-<version>.exe`, gebaut aus
@@ -190,7 +217,7 @@ Eine Installationsdatei für den PC:
 
 ---
 
-## 4. Entwicklungsumgebung
+## 5. Entwicklungsumgebung
 
 * `python3` = 3.11 **ohne** tkinter. **`/usr/bin/python3.12` hat tkinter 8.6** —
   damit laufen die GUI-Tests.
@@ -209,7 +236,7 @@ Eine Installationsdatei für den PC:
 
 ---
 
-## 5. Bewusste Entscheidungen
+## 6. Bewusste Entscheidungen
 
 * **Oberfläche auf Englisch**, Dokumentation auf Deutsch — die Terminologie
   (iflash/dflash, toolkey, XDF, map slot) ist ohnehin englisch. Umstellbar.

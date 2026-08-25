@@ -184,7 +184,16 @@ Datei in den Auftragsordner legen. Die App erkennt sie als Original (die
 Programm-ID aus dem Namen wird gegen das getunte Image geprüft), übernimmt die
 VIN aus dem Namen und legt sie im Arbeitsverzeichnis automatisch als
 `00005C64148205_original.bin` ab — exakt die Umbenennung, die man sonst von
-Hand macht. Weicht die eingetippte VIN vom Kundendateinamen ab, warnt die
+Hand macht. Download-Kopien (`… (1).bin`, `… - Kopie.bin`) werden genauso
+erkannt.
+
+Die VIN wird dabei **nur aus einem Read übernommen, der zu diesem Auftrag
+gehört**: er muss neben der getunten Datei liegen und die Programm-ID dieses
+ROMs tragen. Grund: eine Programm-ID benennt einen Softwarestand, kein Auto —
+zwei Kunden auf demselben Stand teilen sie sich. Ein archivierter Read aus dem
+Bibliotheksordner dient deshalb weiter als Original, liefert aber nie die VIN.
+Liegen zwei Reads mit verschiedenen VINs im Ordner, bleibt das Feld leer statt
+zu raten. Weicht eine eingetippte VIN vom Kundendateinamen ab, warnt die
 Vorprüfung.
 
 ### Wie die App die restlichen Dateien findet
@@ -199,6 +208,14 @@ wird so nie versehentlich genommen.
 Gesucht wird zuerst im Ordner der getunten Datei, danach im optionalen
 Bibliotheksordner samt Unterordnern. Ohne Nummer im Namen greift die
 Rückfallregel „die einzige eindeutige Datei im selben Ordner".
+
+**Die ganze MHD-XDF-Sammlung als Bibliothek.** Unter *Settings* trägst du den
+kompletten XDF-Ordner ein — Plattform, DME, Softwarestände, Unterordner bis
+sechs Ebenen tief. Sobald die ROM-Nummer aus der Kundendatei feststeht, wird
+die passende XDF allein über den Dateinamen gefunden; auch bei mehreren tausend
+XDFs bleibt das im Hundertstelsekunden-Bereich. Liegen mehrere XDFs zur selben
+ROM-Nummer vor (verschiedene Revisionen), nimmt die App die neueste und sagt es
+im Log.
 
 Ein typischer Kundenordner braucht also gar keine Einrichtung:
 
@@ -397,7 +414,7 @@ Dazu zwei Regeln, an die sich beide Programme halten:
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v        # 92 Tests, keine Anzeige nötig
+python -m unittest discover -s tests -v        # 112 Tests, keine Anzeige nötig
 
 # GUI-Tests (brauchen tkinter und eine Anzeige)
 xvfb-run -a -s "-screen 0  880x560x24" python tests/smoke_gui_suite.py
