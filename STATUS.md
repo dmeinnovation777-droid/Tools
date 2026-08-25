@@ -13,15 +13,15 @@ Bedienung und Aufbau stehen im [README](README.md).
 | Branding-Pipeline aus dem Vektor-Logo | fertig |
 | Gemeinsames Design-System `dme_ui.py` | fertig |
 | AutoTuner Backup Tool | fertig, 24 Unit-Tests + GUI-Smoke-Test |
-| MHD Lock Tool | fertig, 79 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
-| Starter `dme_suite.py` | fertig, 9 Unit-Tests + GUI-Smoke-Test |
+| MHD Lock Tool | fertig, 84 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
+| Starter `dme_suite.py` | fertig, 11 Unit-Tests + GUI-Smoke-Test |
 | Windows-Setup (Inno Setup) + CI-Build | fertig |
 | README, Build-Skripte | fertig |
 
-`python -m unittest discover -s tests` → 112 Tests, grün.
+`python -m unittest discover -s tests` → 119 Tests, grün.
 
 Produktname und Version stehen zentral in `dme_brand.py`
-(`SUITE = "DME Innovation Tools"`, `VERSION = "1.4.0"`); beide Werkzeuge, das
+(`SUITE = "DME Innovation Tools"`, `VERSION = "1.4.1"`); beide Werkzeuge, das
 Setup und der Dateiname der Setup-Datei ziehen daraus.
 
 ---
@@ -163,6 +163,17 @@ Die Vorprüfung warnt, wenn die VIN vom Kunden-Dateinamen abweicht oder der Read
 versehentlich als Tune gewählt wurde. End-to-End an den Echtdaten geprüft: das
 gestagte Verzeichnis ist deckungsgleich mit dem handgebauten Ordner.
 
+**Welche Datei das Original wird.** Ordner aus dem alten Handbetrieb enthalten
+beides: den unveränderten Kunden-Read *und* die von Hand umbenannte Kopie. Beide
+tragen dieselbe ROM-Nummer, die Auswahl hing also an der alphabetischen
+Sortierung — bei einem kleingeschriebenen Präfix (`stock_…_original.bin`) hätte
+der rohe Read gewonnen und wäre stillschweigend zur Diff-Basis geworden. Eine
+bewusst auf `*_original.bin` benannte Datei hat deshalb Vorrang vor einem Read;
+die Sortierung ist stabil, der eigene Ordner kommt weiterhin vor der Bibliothek.
+Umgekehrt blockiert ein Read mit fremder Programm-ID nicht mehr die
+Rückfallregel „die einzige Stock-ROM im Ordner" — er wird dort ignoriert, statt
+den Ordner als mehrdeutig zu melden.
+
 **Woher die VIN kommen darf.** Eine Programm-ID benennt einen Softwarestand,
 kein Auto — zwei Kunden auf demselben Stand teilen sie sich. Eine automatisch
 gesetzte VIN wird deshalb nur akzeptiert, wenn der Read **neben der getunten
@@ -172,7 +183,14 @@ nie die VIN; liegen zwei Reads mit verschiedenen VINs im Auftragsordner, bleibt
 das Feld leer und die Notiz sagt, dass hier nichts zu raten ist. Ebenso setzt
 eine neue getunte Datei die VIN in der Oberfläche zurück, und Batch-Jobs erben
 keine VIN vom vorherigen Auftrag. Alles andere könnte eine `.mhd` auf das
-falsche Auto locken, ohne dass es jemand merkt.
+falsche Auto locken, ohne dass es jemand merkt. Nennt eine `<VIN>_vin.txt` im
+Ordner ein anderes Auto als der Read, gewinnt weiterhin der Read — aber die
+Abweichung wird gemeldet, statt sie stillschweigend zu übergehen.
+
+**Die Warnung „ist das wirklich der Tune?"** greift nur noch beim exakten
+Read-Namen. Tuner benennen die ausgelieferte Datei häufig nach der Quelle
+(`…_mapswitch_STG2.bin`); dort löste die Warnung bei jedem Durchlauf grundlos
+aus und hätte die Leute daran gewöhnt, sie auch im ernsten Fall zu überlesen.
 
 ### 3.6 Die XDF-Bibliothek als Ganzes
 

@@ -339,6 +339,12 @@ def _is_stock_name(name: str) -> bool:
     return _is_customer_read(name)
 
 
+def _is_bare_customer_read(path: str) -> bool:
+    """Exactly <VIN>_<id>_mapswitch.bin - not a tune named after one."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    return bool(parse_customer_read(path)[1]) and stem.lower().endswith("_mapswitch")
+
+
 def _newest(paths: list[str]) -> str:
     """Several files for the same ROM: the most recent one is the current XDF."""
     try:
@@ -383,6 +389,12 @@ class _IdLookup:
         return "", ""
 
 
+def _read_of_another_car(path: str, lookup: "_IdLookup") -> bool:
+    """A customer read whose program id is absent from this image is not this job's."""
+    read_id = parse_customer_read(path)[1]
+    return bool(read_id) and not lookup.has(read_id)
+
+
 def resolve_inputs(tuned_path: str, library_dir: str = "", toolkey: str = "",
                    max_depth: int = LIBRARY_DEPTH) -> Resolution:
     """
@@ -407,13 +419,19 @@ def resolve_inputs(tuned_path: str, library_dir: str = "", toolkey: str = "",
     # ── stock ROM ───────────────────────────────────────────────────────────
     stock_candidates = [p for p in _files_in(folders, _is_stock_name)
                         if os.path.abspath(p) != os.path.abspath(tuned_path)]
+    # A file somebody deliberately named *_original.bin outranks a raw customer
+    # read. Both can match the same ROM, but the curated one was picked as the
+    # diff base on purpose - and folders from the old workflow hold both. The
+    # sort is stable, so the own folder still comes before the library.
+    stock_candidates.sort(key=lambda p: _is_customer_read(os.path.basename(p)))
     stock, rom_id = lookup.first_match(stock_candidates)
     if stock:
         result.sources["stock"] = "matched by ROM id"
     else:
         same_size = [p for p in stock_candidates
                      if os.path.dirname(p) == own_folder
-                     and os.path.getsize(p) == len(data)]
+                     and os.path.getsize(p) == len(data)
+                     and not _read_of_another_car(p, lookup)]
         if len(same_size) == 1:
             stock = same_size[0]
             result.sources["stock"] = "only stock ROM in the folder"
@@ -491,14 +509,22 @@ def resolve_inputs(tuned_path: str, library_dir: str = "", toolkey: str = "",
     elif len(vins) > 1:
         result.notes.append(f"{len(vins)} customer reads with different VINs in the "
                             f"folder - type the right VIN, it cannot be guessed.")
-    if not result.vin:
-        for path in _files_in([own_folder], lambda n: n.lower().endswith(VIN_SUFFIX)):
-            candidate = os.path.basename(path)[: -len(VIN_SUFFIX)]
-            ok, vin, _ = validate_vin(candidate)
-            if ok:
-                result.vin = vin
-                result.sources["vin"] = "from the folder"
-                break
+    # A <VIN>_vin.txt is normally left over from an earlier run of the same job.
+    # If it names a different car, somebody put it there on purpose - say so
+    # instead of quietly preferring one of the two.
+    for path in _files_in([own_folder], lambda n: n.lower().endswith(VIN_SUFFIX)):
+        candidate = os.path.basename(path)[: -len(VIN_SUFFIX)]
+        ok, vin, _ = validate_vin(candidate)
+        if not ok:
+            continue
+        if not result.vin:
+            result.vin = vin
+            result.sources["vin"] = "from the folder"
+        elif vin != result.vin:
+            result.notes.append(f"{os.path.basename(path)} in the folder names a different "
+                                f"car than the customer's read ({result.vin}) - check which "
+                                f"VIN is right.")
+        break
 
     return result
 
@@ -752,9 +778,12 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
         report.add("error", "Stock and tuned .bin are the same file.")
         has_tuned = False
 
-    if has_tuned and parse_customer_read(job.tuned_bin)[1]:
-        report.add("warn", "The tuned .bin is named like a customer's backup read "
-                           "(*_mapswitch.bin) — is this really the tune?")
+    # Only the untouched read name is suspicious. Tuners routinely name the tune
+    # after it ("…_mapswitch_STG2.bin"), and warning on those trains people to
+    # ignore the warning in the one case that matters.
+    if has_tuned and _is_bare_customer_read(job.tuned_bin):
+        report.add("warn", "The tuned .bin is named exactly like the customer's backup "
+                           "read — is this really the tune?")
     # Only a read filed with this job says anything about this car; one pulled
     # from the library belongs to whoever sent it.
     if has_stock and has_tuned and ok_vin and \

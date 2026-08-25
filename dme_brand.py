@@ -13,7 +13,7 @@ import tempfile
 
 VENDOR = "DME Innovation"
 SUITE = "DME Innovation Tools"
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 PUBLISHER_URL = "https://github.com/dmeinnovation777-droid/Tools"
 
 # Colour of the header surface the wordmark is composited onto (see dme_ui.SURFACE)

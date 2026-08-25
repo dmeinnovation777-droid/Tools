@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-1.4.0.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-1.4.1.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -18,6 +18,24 @@ Dazu Startmenü-Einträge, auf Wunsch eine Desktop-Verknüpfung und ein Uninstal
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Korrekturen in 1.4.1
+
+Nachträglich gefunden und behoben — alles Fälle, die bei über Jahre gewachsenen
+Auftragsordnern auftreten:
+
+* **Liegt neben der Kundendatei auch eine von Hand umbenannte `*_original.bin`,
+  gewinnt jetzt immer die umbenannte.** Vorher entschied die alphabetische
+  Sortierung, welche der beiden als Vergleichsbasis diente — bei einem
+  kleingeschriebenen Namen wie `stock_….bin` also die falsche.
+* **Eine übrig gebliebene Kundendatei eines anderen Fahrzeugs blockiert die
+  Erkennung nicht mehr.** Vorher meldete der Ordner „2 mögliche Stock-ROMs" und
+  verlangte eine Handauswahl, obwohl nur eine Datei zum Auto passte.
+* **Nennt eine `<VIN>_vin.txt` im Ordner ein anderes Auto als die Kundendatei,
+  wird das gemeldet** statt stillschweigend übergangen.
+* **Keine Fehlwarnung mehr bei Tunes, die nach der Kundendatei benannt sind**
+  (`…_mapswitch_STG2.bin`). Die Rückfrage „ist das wirklich der Tune?" kommt nur
+  noch beim unveränderten Kundendatei-Namen.
 
 ## Neu in 1.4.0
 

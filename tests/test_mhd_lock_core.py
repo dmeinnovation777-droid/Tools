@@ -290,6 +290,16 @@ class TestPreflight(unittest.TestCase):
         self.assertTrue(any("is this really the tune" in i.text
                             for i in report.warnings))
 
+    def test_a_tune_named_after_the_read_is_not_flagged(self):
+        """Naming the tune after its source read is normal - it must stay quiet."""
+        for name in ("WBS42AY040FR10018_00005C64148205_mapswitch_STG2.bin",
+                     "WBS42AY040FR10018_00005C64148205_mapswitch v2.bin"):
+            tuned = bytearray(0x1000)
+            tuned[0x100:0x104] = b"\x11\x22\x33\x44"
+            self.job.tuned_bin = write(os.path.join(self.tmp.name, name), bytes(tuned))
+            report = m.preflight(self.job)
+            self.assertFalse(any("really the tune" in i.text for i in report.warnings), name)
+
     def test_changes_outside_the_xdf_are_reported_but_not_fatal(self):
         tuned = bytearray(0x1000)
         tuned[0x500:0x508] = b"\xAA" * 8            # no table there
@@ -648,6 +658,42 @@ class TestAutomaticResolution(unittest.TestCase):
         write(os.path.join(self.car, "WBS42AY040FR10018_00001A841D1401_mapswitch.bin"),
               bytes(0x2000))
         self.assertEqual(m.resolve_inputs(self.tuned).vin, "")
+
+    def test_a_curated_original_outranks_the_raw_read(self):
+        """Folders from the old workflow hold both - the chosen base must win."""
+        stock = m.read_bytes(self.stock)
+        os.replace(self.stock, os.path.join(self.car, f"stock_{self.ROM_ID}_original.bin"))
+        read = write(os.path.join(self.car,
+                                  f"WBS42AY040FR10018_{self.ROM_ID}_mapswitch.bin"), stock)
+        found = m.resolve_inputs(self.tuned)
+        self.assertTrue(found.stock.endswith("_original.bin"), found.stock)
+        self.assertNotEqual(found.stock, read)
+        self.assertEqual(found.vin, "WBS42AY040FR10018")   # the read still gives the VIN
+
+    def test_a_foreign_read_does_not_block_the_only_stock_in_the_folder(self):
+        """An unnamed original used to resolve on its own - a leftover read kept it so."""
+        os.replace(self.stock, os.path.join(self.car, "MathiasS58_original.bin"))
+        write(os.path.join(self.car, "WBS42AY040FR10018_00001A841D1401_mapswitch.bin"),
+              bytes(0x2000))
+        found = m.resolve_inputs(self.tuned)
+        self.assertTrue(found.stock.endswith("MathiasS58_original.bin"), found.stock)
+        self.assertEqual(found.source("stock"), "only stock ROM in the folder")
+
+    def _add_read(self, vin="WBS42AY040FR10018"):
+        return write(os.path.join(self.car, f"{vin}_{self.ROM_ID}_mapswitch.bin"),
+                     m.read_bytes(self.stock))
+
+    def test_a_vin_txt_naming_another_car_is_reported(self):
+        self._add_read()
+        write(os.path.join(self.car, "DMETEST0000000001_vin.txt"), "")
+        found = m.resolve_inputs(self.tuned)
+        self.assertEqual(found.vin, "WBS42AY040FR10018")
+        self.assertTrue(any("different car" in note for note in found.notes), found.notes)
+
+    def test_a_matching_vin_txt_says_nothing(self):
+        self._add_read()
+        write(os.path.join(self.car, "WBS42AY040FR10018_vin.txt"), "")
+        self.assertEqual(m.resolve_inputs(self.tuned).notes, [])
 
     def test_a_download_copy_of_the_read_is_still_the_original(self):
         copy = os.path.join(self.car,
