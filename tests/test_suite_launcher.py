@@ -71,6 +71,21 @@ class TestBuildFilesStayInSync(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.group(1), brand.VERSION)
 
+    def test_header_plate_matches_the_sidebar(self):
+        """Tk cannot alpha-composite, so the wordmark plate is baked in at
+        dme_brand.HEADER_BG. If that drifts from dme_ui.SURFACE, a lighter
+        rectangle shows behind the logo - which is exactly what shipped in 1.3.0."""
+        surface = re.search(r'^SURFACE = "([^"]+)"', self.read("dme_ui.py"), re.M)
+        self.assertIsNotNone(surface)
+        self.assertEqual(brand.HEADER_BG.upper(), surface.group(1).upper())
+
+    def test_asset_generator_bakes_the_same_colour(self):
+        baked = re.search(r"^HEADER_BG = \((\d+), (\d+), (\d+)\)",
+                          self.read("tools", "generate_assets.py"), re.M)
+        self.assertIsNotNone(baked)
+        self.assertEqual("#%02X%02X%02X" % tuple(int(g) for g in baked.groups()),
+                         brand.HEADER_BG.upper())
+
     def test_installer_script_is_ascii_only(self):
         # Inno Setup needs a BOM for non-ASCII sources; staying ASCII avoids it.
         with open(os.path.join(ROOT, "installer", "dme-innovation-tools.iss"), "rb") as handle:
