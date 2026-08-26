@@ -509,6 +509,103 @@ class TestTheCarComesBackWithTheLayout(unittest.TestCase):
                              f"{name} did not survive the round trip")
 
 
+class TestTwoCarsCanShareOneSize(unittest.TestCase):
+    """Found by holding four real bench backups against each other.
+
+    A BMW X5 on an MG1CS201 and a VW Caddy on an MD1CS004 both come to
+    9,256,960 bytes and split the same way, 8,388,608 + 868,352. The memory is
+    kept by total size, so reading the Caddy quietly overwrote the BMW, and a
+    BMW then went back to its owner as a Volkswagen: wrong make, wrong model,
+    wrong ECU, wrong power. Empty fields are a nuisance. The wrong car in
+    somebody's archive is a fault.
+    """
+
+    PARTS = [{"name": "iflash0.bin", "size": 8388608},
+             {"name": "dflash0.bin", "size": 868352}]
+    TOTAL = 8388608 + 868352
+
+    BMW = {"VehicleProducer": "BMW", "VehicleBuild": "X5",
+           "VehicleSeries": "G05", "VehicleModelYear": "2019",
+           "EcuBuild": "MG1CS201", "OutputKW": "250", "EngineType": "PETROL"}
+    VW = {"VehicleProducer": "Volkswagen", "VehicleBuild": "Caddy",
+          "VehicleModelYear": "2021", "EcuBuild": "MD1CS004",
+          "OutputKW": "90", "EngineType": "DIESEL"}
+
+    def both(self, how_to_bmw="<html>de</html>", how_to_vw="<html>de</html>"):
+        store = at.remember_layout(self.PARTS, "bmw-x5-MG1CS201.zip", store={},
+                                   meta=self.BMW, how_to=how_to_bmw)
+        return at.remember_layout(self.PARTS, "vw-caddy-MD1CS004.zip", store=store,
+                                  meta=self.VW, how_to=how_to_vw)
+
+    def test_the_second_car_does_not_erase_the_first(self):
+        store = self.both()
+        cars = at.remembered_cars(self.TOTAL, store=store)
+        makes = {car["meta"]["VehicleProducer"] for car in cars}
+        self.assertEqual(makes, {"BMW", "Volkswagen"})
+
+    def test_with_nothing_to_go_on_it_fills_in_nothing(self):
+        store = self.both()
+        self.assertEqual(at.remembered_meta(self.TOTAL, store=store), {})
+        self.assertEqual(at.remembered_meta(self.TOTAL, store=store,
+                                            hint="combined.bin"), {})
+
+    def test_the_file_name_settles_it(self):
+        store = self.both()
+        bmw = at.remembered_meta(
+            self.TOTAL, store=store,
+            hint="20250913-133520-BMW-X5-2019-MG1CS201-Bench-backup_combined.bin")
+        self.assertEqual(bmw.get("VehicleProducer"), "BMW")
+        self.assertEqual(bmw.get("OutputKW"), "250")
+        vw = at.remembered_meta(
+            self.TOTAL, store=store,
+            hint="20251126-152355-Volkswagen-Caddy-2021-MD1CS004-Bench-backup.bin")
+        self.assertEqual(vw.get("VehicleProducer"), "Volkswagen")
+        self.assertEqual(vw.get("OutputKW"), "90")
+
+    def test_a_name_that_fits_both_settles_nothing(self):
+        store = self.both()
+        # "Bench-backup" is in every one of these file names.
+        self.assertEqual(
+            at.remembered_meta(self.TOTAL, store=store,
+                               hint="Bench-backup_combined.bin"), {})
+
+    def test_reading_the_same_car_again_does_not_pile_up(self):
+        store = self.both()
+        store = at.remember_layout(self.PARTS, "bmw-again.zip", store=store,
+                                   meta=self.BMW)
+        cars = at.remembered_cars(self.TOTAL, store=store)
+        self.assertEqual(len(cars), 2, [c["meta"]["VehicleProducer"] for c in cars])
+
+    def test_the_page_is_used_when_they_all_carry_the_same_one(self):
+        """Nothing to choose between them, so nothing is being guessed."""
+        store = self.both()
+        self.assertEqual(at.remembered_how_to(self.TOTAL, store=store),
+                         "<html>de</html>")
+
+    def test_a_page_is_not_guessed_when_they_differ(self):
+        store = self.both(how_to_bmw="<html>de</html>", how_to_vw="<html>en</html>")
+        self.assertEqual(at.remembered_how_to(self.TOTAL, store=store), "")
+        self.assertEqual(
+            at.remembered_how_to(self.TOTAL, store=store,
+                                 hint="BMW-X5-MG1CS201.bin"), "<html>de</html>")
+
+    def test_the_split_itself_is_still_remembered_either_way(self):
+        """Both cars split the same. That much a size does settle."""
+        store = self.both()
+        parts, _label = at.layout_for_size(self.TOTAL, store=store)
+        self.assertEqual([p["name"] for p in parts],
+                         ["iflash0.bin", "dflash0.bin"])
+
+    def test_a_store_from_before_this_still_answers(self):
+        old = {str(self.TOTAL): {"label": "alt.zip", "parts": self.PARTS,
+                                 "how_to": "<html>de</html>", "meta": self.BMW}}
+        self.assertEqual(at.remembered_meta(self.TOTAL, store=old)["VehicleBuild"],
+                         "X5")
+        # And a second car written into it now sits beside the first, not on it.
+        store = at.remember_layout(self.PARTS, "vw.zip", store=old, meta=self.VW)
+        self.assertEqual(len(at.remembered_cars(self.TOTAL, store=store)), 2)
+
+
 class TestPresetsAgainstRealReads(unittest.TestCase):
     """Presets decide how a .bin is cut when nothing else is known.
 

@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-3.2.1.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-3.2.2.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -23,6 +23,45 @@ ein Uninstaller.
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Korrektur in 3.2.2: zwei Autos, eine Größe
+
+Gefunden beim Vergleich von vier echten Bench Backups gegen das alte Werkzeug.
+
+**Ein BMW X5 auf MG1CS201 und ein VW Caddy auf MD1CS004 sind beide 9.256.960
+Bytes groß und werden gleich aufgeteilt.** Das Gedächtnis lag nach Größe ab,
+also hat das Einlesen des Caddy den BMW überschrieben, und der BMW ging danach
+als Volkswagen zum Kunden zurück: falsche Marke, falsches Modell, falsches
+Steuergerät, falsche Leistung.
+
+Das war schlimmer als das, was es ersetzen sollte. Leere Felder sind lästig,
+das falsche Auto in einem fremden Archiv ist ein Fehler.
+
+Gemerkt werden jetzt **alle** Fahrzeuge zu einer Größe. Beim Öffnen einer .bin
+entscheidet der Dateiname, welches gemeint ist, denn die Dateien kommen vom
+Lesegerät nach Auto und Steuergerät benannt. Sagt der Name nichts, wird nichts
+geraten: die Aufteilung kommt, die Angaben zum Fahrzeug bleiben leer, und die
+Seite sagt welche Fahrzeuge in Frage kommen.
+
+Dasselbe gilt für die Hilfeseite: tragen alle gemerkten Fahrzeuge dieselbe,
+wird sie benutzt, denn dann ist nichts zu entscheiden. Sind sie verschieden und
+das Auto ist unklar, kommt die eingebaute.
+
+## Vergleich mit dem alten Werkzeug
+
+Vier echte Archive, beide Wege durchgespielt, Ergebnis gegen das Original:
+
+| | altes Werkzeug | 3.2.2 |
+| --- | --- | --- |
+| iflash0.bin | gleich | gleich |
+| dflash0.bin | gleich | gleich |
+| contents.ini | **anders** | gleich |
+| how-to-use-backup.html | **anders** | gleich |
+
+Das alte Werkzeug verliert bei jedem der vier Autos `VehicleSeries` und
+`OutputKW` und schreibt seine eigene englische Hilfeseite über die deutsche des
+Lesegeräts. Die .bin, die beide aus einem Archiv machen, ist byteweise
+dieselbe.
 
 ## Korrektur in 3.2.1: Backup, BIN nach ZIP
 

@@ -14,6 +14,7 @@ top of the shared DME widget kit (dme_ui.py / dme_brand.py).
 import datetime
 import json
 import os
+import re
 import sys
 import zipfile
 
@@ -89,6 +90,28 @@ def load_layouts() -> dict:
         return {}
 
 
+#: How many different cars are held for one and the same total size.
+CARS_PER_SIZE = 8
+
+#: What makes one car a different car from another, for the memory below.
+_CAR_KEYS = ("EcuBuild", "VehicleProducer", "VehicleBuild", "VehicleModel")
+
+
+def car_name(meta: dict) -> str:
+    """A car in a few words, for saying which one is meant."""
+    named = [(meta or {}).get(key, "").strip() for key in
+             ("VehicleProducer", "VehicleBuild", "VehicleModelYear")]
+    words = " ".join(word for word in named if word)
+    ecu = (meta or {}).get("EcuBuild", "").strip()
+    if ecu and words:
+        return f"{words} ({ecu})"
+    return words or ecu
+
+
+def _same_car(one: dict, other: dict) -> bool:
+    return all((one or {}).get(k, "") == (other or {}).get(k, "") for k in _CAR_KEYS)
+
+
 def remember_layout(parts: list[dict], label: str = "", store: dict = None,
                     how_to: str = "", meta: dict = None) -> dict:
     """Store one layout under its total size. Returns the updated store.
@@ -96,20 +119,38 @@ def remember_layout(parts: list[dict], label: str = "", store: dict = None,
     `how_to` is the archive's own how-to-use-backup.html and `meta` is what its
     contents.ini said about the car. Neither can be worked out again from a
     .bin: which car a dump came from is not written anywhere in the dump. So
-    both are carried across with the layout, and a .bin split months later
-    still goes back into an archive that names the right car in the right
-    language."""
+    both are carried across with the layout.
+
+    A size does not name a car, though. A BMW X5 on an MG1CS201 and a VW Caddy
+    on an MD1CS004 both come to 9,256,960 bytes, split the same way. Holding
+    one car per size meant the second read quietly overwrote the first, and a
+    BMW went back to its owner as a Volkswagen. So every car is kept, and the
+    one to use is worked out when a .bin is picked, or nothing is."""
     parts = [{"name": p["name"], "size": int(p["size"])} for p in parts if p.get("name")]
     if not parts:
         return store if store is not None else load_layouts()
     layouts = load_layouts() if store is None else store
     total = sum(p["size"] for p in parts)
-    entry = {"label": label, "parts": parts}
     known = layouts.get(str(total)) if isinstance(layouts.get(str(total)), dict) else {}
+    entry = {"label": label, "parts": parts}
     # Never lose one that is already held: a later split without the archive
     # in hand passes neither, and would otherwise wipe both.
     entry["how_to"] = how_to or known.get("how_to", "")
-    entry["meta"] = {k: v for k, v in (meta or {}).items() if v} or known.get("meta", {})
+
+    cars = [dict(car) for car in known.get("cars", []) if isinstance(car, dict)]
+    if not cars and known.get("meta"):
+        # An entry written before several cars could be held. Carry its one
+        # over first, or the next car read would take its place instead of
+        # standing beside it.
+        cars = [{"label": known.get("label", ""), "meta": dict(known["meta"]),
+                 "how_to": known.get("how_to", "")}]
+    kept_meta = {k: v for k, v in (meta or {}).items() if v}
+    if kept_meta:
+        fresh = {"label": label, "meta": kept_meta,
+                 "how_to": how_to or known.get("how_to", "")}
+        cars = [car for car in cars if not _same_car(car.get("meta"), kept_meta)]
+        cars.insert(0, fresh)
+    entry["cars"] = cars[:CARS_PER_SIZE]
     layouts[str(total)] = entry
     if len(layouts) > LAYOUT_LIMIT:
         for key in list(layouts)[:len(layouts) - LAYOUT_LIMIT]:
@@ -132,18 +173,72 @@ def layout_for_size(size: int, store: dict = None) -> tuple[list[dict], str] | N
     return entry["parts"], entry.get("label", "")
 
 
-def remembered_how_to(size: int, store: dict = None) -> str:
-    """The how-to-use page that came with the archive of this total size."""
+def remembered_cars(size: int, store: dict = None) -> list[dict]:
+    """Every car ever seen at this total size, newest first."""
     layouts = load_layouts() if store is None else store
-    entry = layouts.get(str(int(size)))
-    return (entry or {}).get("how_to", "")
+    entry = layouts.get(str(int(size))) or {}
+    cars = [car for car in entry.get("cars", []) if isinstance(car, dict) and car.get("meta")]
+    if cars:
+        return cars
+    if entry.get("meta"):                     # written before there were several
+        return [{"label": entry.get("label", ""), "meta": dict(entry["meta"]),
+                 "how_to": entry.get("how_to", "")}]
+    return []
 
 
-def remembered_meta(size: int, store: dict = None) -> dict:
-    """What the archive of this total size said about the car."""
+def pick_car(cars: list[dict], hint: str = "") -> dict | None:
+    """Which of several cars a file name is talking about, or none.
+
+    The archives come off the reading tool named after the car and the ECU,
+    and so does the .bin split out of one. Where that name says which car it
+    is, this finds it; where it does not, this says so instead of guessing,
+    because the answer ends up in the customer's archive.
+    """
+    if not cars:
+        return None
+    if len(cars) == 1:
+        return cars[0]
+    plain = re.sub(r"[^a-z0-9]+", "", (hint or "").lower())
+    if not plain:
+        return None
+    matches = []
+    for car in cars:
+        words = [car.get("label", "")] + [car["meta"].get(key, "") for key in _CAR_KEYS]
+        marks = {re.sub(r"[^a-z0-9]+", "", word.lower()) for word in words if word}
+        if any(mark and len(mark) >= 4 and mark in plain for mark in marks):
+            matches.append(car)
+    return matches[0] if len(matches) == 1 else None
+
+
+def remembered_how_to(size: int, store: dict = None, hint: str = "") -> str:
+    """The how-to-use page that came with the archive of this total size.
+
+    Several cars can share a size, and the reading tool writes this page in
+    the operator's language. Where they all carry the same page there is
+    nothing to choose, so it is used; where they differ and the car is not
+    known, the built-in page is the honest answer.
+    """
+    cars = remembered_cars(size, store)
+    pages = {car.get("how_to", "") for car in cars if car.get("how_to")}
+    if len(pages) == 1:
+        return pages.pop()
+    car = pick_car(cars, hint)
+    if car and car.get("how_to"):
+        return car["how_to"]
     layouts = load_layouts() if store is None else store
-    entry = layouts.get(str(int(size)))
-    return dict((entry or {}).get("meta", {}))
+    entry = layouts.get(str(int(size))) or {}
+    return entry.get("how_to", "") if not cars else ""
+
+
+def remembered_meta(size: int, store: dict = None, hint: str = "") -> dict:
+    """What the archive this .bin came out of said about the car.
+
+    Empty when more than one car is held for this size and the file name does
+    not say which. Empty fields are a nuisance; the wrong car in a customer's
+    archive is a fault.
+    """
+    car = pick_car(remembered_cars(size, store), hint)
+    return dict(car["meta"]) if car else {}
 
 
 def presets_for_size(size: int) -> list[str]:
@@ -972,12 +1067,22 @@ class BackupUI:
             # The car comes back with the layout. Which car a dump came from
             # is written nowhere in the dump, so if it is not carried across
             # here it is gone, and the archive would go back to the customer
-            # naming no car at all.
-            car = self._restore_meta(remembered_meta(size))
+            # naming no car at all. The file name goes along as a hint: several
+            # cars can share one size, and the name is usually the only thing
+            # left that says which one this is.
+            hint = os.path.basename(self._b2z_bin_var.get().strip())
+            car = self._restore_meta(remembered_meta(size, hint=hint))
+            known = remembered_cars(size)
             if car:
                 self.banner.show("ok", t("backup.parts.restored_car",
                                          n=len(parts), car=car,
                                          source=label or t("word.manual")))
+            elif len(known) > 1:
+                # Two cars, one size, and nothing to tell them apart. Filling
+                # in either would put the wrong car in somebody's archive.
+                names = ", ".join(sorted({car_name(one["meta"]) for one in known}))
+                self.banner.show("warn", t("backup.parts.several_cars",
+                                           n=len(parts), cars=names))
             else:
                 self.banner.show("ok", t("backup.parts.restored", n=len(parts),
                                          source=label or t("word.manual")))
@@ -1100,7 +1205,8 @@ class BackupUI:
         # filled from the same memory when the .bin is picked, so clearing one
         # is a decision, and a VIN wiped before handing the file on has to
         # stay wiped.
-        remembered = remembered_meta(os.path.getsize(bin_path))
+        remembered = remembered_meta(os.path.getsize(bin_path),
+                                     hint=os.path.basename(bin_path))
         meta = {INI_KEYS[key]: value for key, value in remembered.items()
                 if key in INI_KEYS and value and key not in self._meta_vars}
         for key, var in self._meta_vars.items():
@@ -1117,7 +1223,8 @@ class BackupUI:
         # looked up by the size that identifies that archive.
         ok, msg = bin_to_zip(
             bin_path, out_path, parts_config, meta,
-            how_to_html=remembered_how_to(sum(p['size'] for p in parts_config)))
+            how_to_html=remembered_how_to(sum(p['size'] for p in parts_config),
+                                          hint=os.path.basename(bin_path)))
         if ok:
             self.banner.show("ok", msg, action_text=t("word.open_folder"),
                              action=lambda: ui.reveal_in_file_manager(out_path))

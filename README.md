@@ -53,7 +53,7 @@ Größen bereit.
 unter *Assets*:
 
 ```
-DME-Innovation-Tools-Setup-3.2.1.exe
+DME-Innovation-Tools-Setup-3.2.2.exe
 ```
 
 Windows zeigt bei unsignierten Setups „Der Computer wurde durch Windows
@@ -375,7 +375,7 @@ build_exe.bat           :: nur die drei .exe, ohne Setup
 (`winget install JRSoftware.InnoSetup`). Ergebnis:
 
 ```
-dist\DME-Innovation-Tools-Setup-3.2.1.exe
+dist\DME-Innovation-Tools-Setup-3.2.2.exe
 dist\DME Innovation Tools.exe
 ```
 
@@ -463,7 +463,7 @@ Dazu zwei Regeln, an die sich beide Programme halten:
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v        # 261 Tests, keine Anzeige nötig
+python -m unittest discover -s tests -v        # 270 Tests, keine Anzeige nötig
 
 # GUI-Tests (brauchen tkinter und eine Anzeige)
 xvfb-run -a -s "-screen 0 1120x860x24" python tests/smoke_gui_suite.py

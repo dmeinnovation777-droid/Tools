@@ -291,6 +291,13 @@ CATALOG: dict[str, dict] = {
     "backup.parts.restored": _(
         "{n} Teile aus {source} übernommen.",
         "{n} parts taken from {source}."),
+    "backup.parts.several_cars": _(
+        "{n} Teile übernommen. Für diese Größe sind mehrere Fahrzeuge gemerkt: "
+        "{cars}. Welches es ist, steht nicht in der .bin, also trage die "
+        "Angaben zum Fahrzeug von Hand ein.",
+        "{n} parts taken. More than one vehicle is remembered for this size: "
+        "{cars}. Which one this is is not written in the .bin, so fill the "
+        "vehicle details in by hand."),
     "backup.parts.restored_car": _(
         "{n} Teile aus {source} übernommen. Fahrzeug: {car}.",
         "{n} parts taken from {source}. Vehicle: {car}."),
