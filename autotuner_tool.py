@@ -659,6 +659,8 @@ class BackupUI:
 
         self.app.set_status(t("word.running"), "busy")
         self.banner.show("busy", t("word.running"))
+        self._z2b_step4.set_state("now")
+        self._z2b_step4.set_running(True)
         self.app.update_idletasks()
 
         ok, msg, parts = zip_to_bin(zip_path, out_path)
@@ -668,6 +670,7 @@ class BackupUI:
             self.banner.show("ok", msg, action_text=t("word.open_folder"),
                              action=lambda: ui.reveal_in_file_manager(out_path))
             self.app.set_status(t("word.done"), "ok")
+            self._z2b_step4.set_running(False)
             self._z2b_step4.set_state("done")
             self._z2b_step4.set_note(os.path.basename(out_path))
             self._z2b_summary.set(f"{len(parts)} \u00b7 "
@@ -675,6 +678,7 @@ class BackupUI:
             self._summary.set(self._z2b_summary.get())
         else:
             self.banner.show("error", msg)
+            self._z2b_step4.set_running(False)
             self._z2b_step4.set_state("err")
             self.app.set_status(t("word.failed"), "error")
 
@@ -989,6 +993,8 @@ class BackupUI:
 
         self.app.set_status(t("word.running"), "busy")
         self.banner.show("busy", t("word.running"))
+        self._b2z_step4.set_state("now")
+        self._b2z_step4.set_running(True)
         self.app.update_idletasks()
 
         # The how-to page belongs to the archive this .bin came out of, so it is
@@ -1000,10 +1006,12 @@ class BackupUI:
             self.banner.show("ok", msg, action_text=t("word.open_folder"),
                              action=lambda: ui.reveal_in_file_manager(out_path))
             self.app.set_status(t("word.done"), "ok")
+            self._b2z_step4.set_running(False)
             self._b2z_step4.set_state("done")
             self._b2z_step4.set_note(os.path.basename(out_path))
         else:
             self.banner.show("error", msg)
+            self._b2z_step4.set_running(False)
             self._b2z_step4.set_state("err")
             self.app.set_status(t("word.failed"), "error")
 

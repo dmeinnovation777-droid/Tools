@@ -186,7 +186,7 @@ class DmeApp(_TkBase):
         ui.button(page.action_row, t("settings.save_now"), self.lock.save_settings,
                   variant="primary", size="lg", bg=ui.SURFACE).pack(side=tk.RIGHT)
         ui.button(page.action_row, t("settings.reset"), self.lock.reset_settings,
-                  variant="ghost", size="lg", bg=ui.SURFACE).pack(
+                  variant="secondary", size="lg", bg=ui.SURFACE).pack(
                       side=tk.RIGHT, padx=(0, ui.px(10)))
         return page
 

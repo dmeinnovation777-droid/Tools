@@ -240,23 +240,11 @@ def round_corners(widget, radius=None, outer_bg=BG, border=None):
     """
     radius = px(10) if radius is None else radius
     inner_bg = widget["bg"]
-    corners = []
-    for index in range(4):
-        canvas = tk.Canvas(widget, width=radius, height=radius, bg=outer_bg,
-                           highlightthickness=0, bd=0)
-        start = (90, 0, 270, 180)[index]
-        offset = ((0, 0), (-radius, 0), (-radius, -radius), (0, -radius))[index]
-        canvas.create_arc(offset[0], offset[1], offset[0] + radius * 2,
-                          offset[1] + radius * 2, start=start, extent=90,
-                          fill=inner_bg, outline=inner_bg)
-        if border:
-            # A second arc, stroke only, so the outline follows the curve.
-            canvas.create_arc(offset[0] + 0.5, offset[1] + 0.5,
-                              offset[0] + radius * 2 - 0.5,
-                              offset[1] + radius * 2 - 0.5,
-                              start=start, extent=90, style="arc",
-                              outline=border, width=1)
-        corners.append(canvas)
+    # One painted corner, cut into four. The arc tk draws has a staircase on
+    # it; this one is worked out against the colour outside the box, so the
+    # bend is as smooth as the straight edge beside it.
+    corners = _Corners(widget, radius, outer_bg, border)
+    corners.set_fill(inner_bg)
 
     # Placed with relx/rely, so tk keeps them in their corners by itself as the
     # widget grows. The only thing a resize can change is whether they fit at
@@ -283,6 +271,35 @@ def round_corners(widget, radius=None, outer_bg=BG, border=None):
     widget.bind("<Configure>", place, add="+")
     place()
     return corners
+
+
+class _Corners(list):
+    """The four painted corners of one box, and the way to recolour them.
+
+    A picture has no fill to change, so a box whose colour depends on what it
+    is saying - a banner turning from green to red - has to be given a new
+    picture rather than a new colour. That is what set_fill does.
+    """
+
+    def __init__(self, widget, radius, outer_bg, border):
+        super().__init__()
+        self._radius = radius
+        self._outer = outer_bg
+        self._border = border
+        self._offsets = ((0, 0), (-radius, 0), (-radius, -radius), (0, -radius))
+        for _ in range(4):
+            self.append(tk.Canvas(widget, width=radius, height=radius,
+                                  bg=outer_bg, highlightthickness=0, bd=0))
+
+    def set_fill(self, fill):
+        """One picture, shown four times, each canvas a different quarter."""
+        radius = self._radius
+        whole = paint.panel(radius * 2, radius * 2, radius, fill, self._outer,
+                            border=self._border, border_width=max(1, px(1)))
+        for canvas, (dx, dy) in zip(self, self._offsets):
+            canvas.delete("all")
+            canvas.create_image(dx, dy, anchor="nw", image=whole)
+            canvas._picture = whole            # tk keeps no reference itself
 
 
 def outlined(parent, fill=CARD, border=BORDER_SOFT, radius=12, bg=None):
@@ -640,8 +657,11 @@ class GroupedList(tk.Frame):
     def __init__(self, parent, label=None, bg=BG, radius=None):
         super().__init__(parent, bg=bg)
         if label:
-            tk.Label(self, text=label, bg=bg, fg=TEXT_FAINT, font=f("section"),
-                     anchor="w").pack(fill=tk.X, padx=px(4), pady=(0, px(6)))
+            # Capitals, because at this size and weight it is a marker above a
+            # block rather than a sentence to be read.
+            tk.Label(self, text=label.upper(), bg=bg, fg=TEXT_FAINT,
+                     font=f("section"), anchor="w").pack(fill=tk.X, padx=px(4),
+                                                         pady=(0, px(6)))
         self.body = tk.Frame(self, bg=CARD, highlightthickness=1, bd=0,
                              highlightbackground=BORDER_SOFT,
                              highlightcolor=BORDER_SOFT)
@@ -1452,6 +1472,7 @@ class Step(tk.Frame):
         self.body = tk.Frame(content, bg=bg)
         self.body.pack(fill=tk.X, pady=(px(4), px(20)))
         self._motion = None
+        self._walk = None
         self._paint()
 
     # ── the rail ────────────────────────────────────────────────────────────
@@ -1498,9 +1519,33 @@ class Step(tk.Frame):
     def set_title(self, text):
         self._title.configure(text=text)
 
+    def set_running(self, on: bool):
+        """Show or hide the walking line inside this step.
+
+        Deliberately not tied to the state: a step can be the one you are on
+        without anything happening yet. The line says work is going on, so it
+        is only ever switched on where work actually starts, and off where it
+        honestly finishes or honestly fails.
+        """
+        if on:
+            if self._walk is None:
+                self._walk = Running(self.body, bg=self._bg)
+            if not self._walk.winfo_manager():
+                self._walk.pack(fill=tk.X, anchor="w", pady=(px(12), px(2)))
+            self._walk.start()
+        elif self._walk is not None:
+            self._walk.stop()
+            if self._walk.winfo_manager():
+                self._walk.pack_forget()
+
+    @property
+    def is_running(self):
+        return self._walk is not None and self._walk.running
+
     def clear(self):
         for child in self.body.winfo_children():
             child.destroy()
+        self._walk = None
 
     def _paint(self):
         spec = _RING[self._state]
@@ -1650,8 +1695,7 @@ class Banner(tk.Frame):
         icons = {"ok": "✓", "error": "✕", "warn": "!", "info": "i", "busy": "•"}
         self._wrap.configure(bg=bg)
         self._inner.configure(bg=bg)
-        for corner in self._corners:
-            corner.itemconfigure("all", fill=bg, outline=bg)
+        self._corners.set_fill(bg)
         self._bar.configure(bg=fg)
         self._icon.configure(bg=bg, fg=fg, text=icons.get(kind, "i"))
         self._text.configure(bg=bg, text=text)
@@ -1878,11 +1922,20 @@ class LogView(tk.Frame):
     TAGS = {"ok": OK, "error": ERR, "warn": WARN, "info": INFO,
             "dim": TEXT_FAINT, "accent": ACCENT_INK}
 
-    def __init__(self, parent, height=12, bg=FIELD):
-        super().__init__(parent, bg=BORDER, highlightthickness=0, bd=0)
+    #: How far the square content has to sit inside the rounded shape so that
+    #: none of its corners pokes out past the bend. Three tenths of the radius
+    #: is where the curve has come in furthest, at forty five degrees.
+    INSET = 0.3
+
+    def __init__(self, parent, height=12, bg=FIELD, radius=10):
+        super().__init__(parent, bg=bg, highlightthickness=1, bd=0,
+                         highlightbackground=BORDER_SOFT,
+                         highlightcolor=BORDER_SOFT)
+        round_corners(self, px(radius), outer_bg=parent["bg"], border=BORDER_SOFT)
         from tkinter import ttk
+        inset = max(1, int(px(radius) * self.INSET))
         holder = tk.Frame(self, bg=bg)
-        holder.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+        holder.pack(fill=tk.BOTH, expand=True, padx=inset, pady=inset)
         holder.grid_rowconfigure(0, weight=1)
         holder.grid_columnconfigure(0, weight=1)
 
@@ -1960,11 +2013,15 @@ class LogView(tk.Frame):
 class Table(tk.Frame):
     """Bordered, dark-styled ttk.Treeview with an auto-hiding scrollbar."""
 
-    def __init__(self, parent, columns, height=8, bg=CARD):
-        super().__init__(parent, bg=BORDER)
+    def __init__(self, parent, columns, height=8, bg=CARD, radius=10):
+        super().__init__(parent, bg=bg, highlightthickness=1, bd=0,
+                         highlightbackground=BORDER_SOFT,
+                         highlightcolor=BORDER_SOFT)
+        round_corners(self, px(radius), outer_bg=parent["bg"], border=BORDER_SOFT)
         from tkinter import ttk
+        inset = max(1, int(px(radius) * LogView.INSET))
         holder = tk.Frame(self, bg=bg)
-        holder.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+        holder.pack(fill=tk.BOTH, expand=True, padx=inset, pady=inset)
         holder.grid_rowconfigure(0, weight=1)
         holder.grid_columnconfigure(0, weight=1)
 

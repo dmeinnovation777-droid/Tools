@@ -2655,6 +2655,7 @@ class LockUI:
             return
         self.lock_page.banner.show("busy", t("status.locking"))
         self.step_run.set_state("now")
+        self.step_run.set_running(True)
         self._start([job], target="lock")
 
     def _save_log(self):
@@ -2721,6 +2722,7 @@ class LockUI:
                                    action_text=t("word.open_folder"),
                                    action=lambda: ui.reveal_in_file_manager(workdir))
         self._last_output = workdir
+        self.step_run.set_running(False)
         self.step_run.set_state("done")
         self.step_run.set_note(os.path.basename(workdir))
         self.app.set_status(t("word.done"), "ok")
@@ -2743,6 +2745,7 @@ class LockUI:
             self._set_batch_cell(index, status=t("word.queued"), output="")
         self.batch_page.banner.show("busy", t("status.locking"))
         self.step_batch_run.set_state("now")
+        self.step_batch_run.set_running(True)
         self._start(list(self.batch_jobs), target="batch", prepare_only=prepare)
 
     def _start(self, jobs, target, prepare_only=False):
@@ -2960,10 +2963,12 @@ class LockUI:
         if target == "batch":
             self.var_batch_summary.set(t(key, ok=successes, failed=failures,
                                          total=total))
+            self.step_batch_run.set_running(False)
             self.step_batch_run.set_state("done" if tone == "ok" else "err")
             self.step_batch_run.set_note(t("batch.step3.progress", done=successes,
                                            total=total))
         else:
+            self.step_run.set_running(False)
             self.step_run.set_state("done" if tone == "ok" else "err")
             if tone == "ok" and last:
                 self.step_run.set_note(os.path.basename(last))
