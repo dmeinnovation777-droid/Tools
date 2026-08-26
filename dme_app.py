@@ -177,6 +177,8 @@ class DmeApp(_TkBase):
         """Throw the pages away and build them again in the new language."""
         active = self.shell.active or self._start_page
         self._start_page = active
+        # Nothing may be in flight while the pages it moves are destroyed.
+        ui.stop_animations()
         for page in self.pages.values():
             page.destroy()
         self.pages = {}
@@ -203,6 +205,7 @@ class DmeApp(_TkBase):
         self.shell.select(key)
 
     def destroy(self):
+        ui.stop_animations()
         for controller in (getattr(self, "lock", None), getattr(self, "backup", None)):
             if controller is not None and hasattr(controller, "shutdown"):
                 controller.shutdown()

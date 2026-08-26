@@ -180,9 +180,62 @@ def validate_vin(vin: str) -> tuple[bool, str, str]:
     return True, value, t("vin.ok")
 
 
+# Two things done to a whole ROM image cost real time on an 8 MB file: reading
+# it, and searching it for program ids. Both used to be asked for again and
+# again while nothing about the file had changed - once per pre-flight, and a
+# pre-flight ran 350 ms after every keystroke. Both are remembered here, keyed
+# by path, modification time and size, so a changed file is never served stale.
+# Few slots on purpose: an entry is the whole image.
+_CACHE_SLOTS = 3
+_BYTES_CACHE: dict[str, tuple] = {}
+_IDS_CACHE: dict[str, tuple] = {}
+
+
+def _file_stamp(path: str):
+    info = os.stat(path)
+    return info.st_mtime_ns, info.st_size
+
+
+def _remember(store: dict, path: str, stamp, value):
+    if len(store) >= _CACHE_SLOTS:
+        store.pop(next(iter(store)), None)
+    store[path] = (stamp, value)
+    return value
+
+
+def forget_files():
+    """Drop what is remembered. For tests, and for a fresh job."""
+    _BYTES_CACHE.clear()
+    _IDS_CACHE.clear()
+    _XDF_CACHE.clear()
+
+
 def read_bytes(path: str) -> bytes:
+    try:
+        stamp = _file_stamp(path)
+    except OSError:
+        stamp = None
+    if stamp is not None:
+        hit = _BYTES_CACHE.get(path)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
     with open(path, "rb") as handle:
-        return handle.read()
+        data = handle.read()
+    return _remember(_BYTES_CACHE, path, stamp, data) if stamp is not None else data
+
+
+def rom_ids_of(path: str, data: bytes = None, limit: int = 12) -> list[str]:
+    """detect_rom_ids for a file, remembered while the file stays as it is."""
+    try:
+        stamp = _file_stamp(path)
+    except OSError:
+        return detect_rom_ids(data if data is not None else b"", limit)
+    hit = _IDS_CACHE.get(path)
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    if data is None:
+        data = read_bytes(path)
+    return _remember(_IDS_CACHE, path, stamp, detect_rom_ids(data, limit))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -223,23 +276,46 @@ def diff_regions(stock: bytes, tuned: bytes, merge_gap: int = 16,
     return [(begin, end - begin) for begin, end in merged]
 
 
-def changed_byte_count(stock: bytes, tuned: bytes) -> int:
+def changed_byte_count(stock: bytes, tuned: bytes, block: int = 4096) -> int:
+    """How many bytes differ.
+
+    Counted in C, not one byte at a time in Python. Block by block, as
+    diff_regions does: an equal block is settled by one memcmp and skipped, and
+    a block that differs is XORed as a single integer and its zero bytes
+    counted, both in C. On an 8 MB pair this takes 0.04 s where the byte loop
+    it replaces took 0.28 s, and it copies nothing.
+    """
     shared = min(len(stock), len(tuned))
-    count = sum(1 for a, b in zip(stock[:shared], tuned[:shared]) if a != b)
-    return count + abs(len(tuned) - len(stock))
+    tail = abs(len(tuned) - len(stock))
+    view_a, view_b = memoryview(stock), memoryview(tuned)
+    count = 0
+    for base in range(0, shared, block):
+        # Both slices end at `shared`, never at the longer file's end: two ints
+        # of different width would XOR to something too wide to write back.
+        end = min(base + block, shared)
+        chunk_a = view_a[base:end]
+        chunk_b = view_b[base:end]
+        if chunk_a == chunk_b:
+            continue
+        size = end - base
+        xor = int.from_bytes(chunk_a, "big") ^ int.from_bytes(chunk_b, "big")
+        count += size - xor.to_bytes(size, "big").count(0)
+    return count + tail
 
 
 def detect_rom_ids(data: bytes, limit: int = 12) -> list[str]:
     """Heuristic: the 14-digit program id and SGBM tokens BMW ROMs carry."""
+    # finditer, not findall: findall builds the complete list of matches over
+    # the whole 8 MB before the loop below gets to stop at the limit.
     found: list[str] = []
-    for match in ROM_ID_RE.findall(data):
-        text = match.decode("ascii")
+    for match in ROM_ID_RE.finditer(data):
+        text = match.group().decode("ascii")
         if text != "0" * 14 and text not in found:
             found.append(text)
         if len(found) >= limit:
             break
-    for match in SGBM_RE.findall(data):
-        text = match.decode("ascii").lower()
+    for match in SGBM_RE.finditer(data):
+        text = match.group().decode("ascii").lower()
         if text not in found:
             found.append(text)
         if len(found) >= limit * 2:
@@ -736,6 +812,7 @@ class Preflight:
     issues: list[Issue] = field(default_factory=list)
     changed_bytes: int = 0
     regions: list[tuple[int, int]] = field(default_factory=list)
+    region_tables: list[list[str]] = field(default_factory=list)
     touched_tables: list[str] = field(default_factory=list)
     uncovered: list[tuple[int, int]] = field(default_factory=list)
     stock_ids: list[str] = field(default_factory=list)
@@ -773,8 +850,175 @@ def _require_file(report: Preflight, path: str, label: str, extension=None) -> b
     return True
 
 
-def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
-    """Check everything the builder would choke on, before spending a run."""
+@dataclass
+class FileScan:
+    """What only the files decide: sizes, differences, ids, table coverage.
+
+    Split out of the pre-flight because it is the expensive half. On a real
+    8 MB S58 pair it is about a second; the other half is a VIN and four stats.
+    The window runs this in a worker and keeps the answer for as long as the
+    three files are untouched, so typing a VIN never pays for it again.
+    """
+    stock: str = ""
+    tuned: str = ""
+    xdf: str = ""
+    stamps: tuple = ()
+    ran: bool = False
+    file_size: int = 0
+    changed_bytes: int = 0
+    regions: list[tuple[int, int]] = field(default_factory=list)
+    # The table names each region falls into, one list per region and in the
+    # same order. Worked out here so the window can print the log without
+    # touching the XDF again.
+    region_tables: list[list[str]] = field(default_factory=list)
+    touched_tables: list[str] = field(default_factory=list)
+    uncovered: list[tuple[int, int]] = field(default_factory=list)
+    stock_ids: list[str] = field(default_factory=list)
+    tuned_ids: list[str] = field(default_factory=list)
+    xdf_title: str = ""
+    xdf_tables: int = 0
+    issues: list[Issue] = field(default_factory=list)
+
+    def matches(self, job: "LockJob") -> bool:
+        """Is this still the answer for these three files, as they are now?"""
+        return (self.ran and self.stock == job.stock_bin
+                and self.tuned == job.tuned_bin and self.xdf == job.xdf
+                and self.stamps == stamps_of(job))
+
+    def add(self, level, text, topic=""):
+        self.issues.append(Issue(level, text, topic))
+
+
+def stamps_of(job: "LockJob") -> tuple:
+    """Path, time and size of the three files a scan depends on."""
+    out = []
+    for path in (job.stock_bin, job.tuned_bin, job.xdf):
+        try:
+            out.append(_file_stamp(path))
+        except OSError:
+            out.append(None)
+    return tuple(out)
+
+
+_XDF_CACHE: dict[str, tuple] = {}
+
+
+def definition_for(path: str) -> "XdfDefinition | None":
+    """Parse an XDF once and reuse it while the file does not change.
+
+    Shared between the worker and the window on purpose: the worker parses it,
+    and by the time the window renders the answer it is already here. Two
+    threads racing only means it is parsed twice, never wrongly.
+    """
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        stamp = _file_stamp(path)
+    except OSError:
+        return None
+    hit = _XDF_CACHE.get(path)
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    try:
+        definition = XdfDefinition.load(path)
+    except Exception:
+        definition = None
+    return _remember(_XDF_CACHE, path, stamp, definition)
+
+
+def scan_files(job: LockJob, definition: XdfDefinition = None) -> FileScan:
+    """Read both images, find the differences, and map them onto the XDF.
+
+    Everything in here is decided by the files alone. Nothing typed into the
+    window changes any of it, which is what makes it cacheable and what makes
+    it safe to run away from the window.
+    """
+    scan = FileScan(stock=job.stock_bin, tuned=job.tuned_bin, xdf=job.xdf,
+                    stamps=stamps_of(job), ran=True)
+
+    has_stock = bool(job.stock_bin) and os.path.isfile(job.stock_bin)
+    has_tuned = bool(job.tuned_bin) and os.path.isfile(job.tuned_bin)
+    has_xdf = bool(job.xdf) and os.path.isfile(job.xdf)
+    if has_stock and has_tuned and \
+            os.path.abspath(job.stock_bin) == os.path.abspath(job.tuned_bin):
+        has_tuned = False
+
+    stock = tuned = b""
+    if has_stock:
+        stock = read_bytes(job.stock_bin)
+    if has_tuned:
+        tuned = read_bytes(job.tuned_bin)
+        scan.file_size = len(tuned)
+
+    if stock and tuned:
+        if len(stock) != len(tuned):
+            scan.add("error", f"Size mismatch: stock is {len(stock):,} bytes, "
+                              f"tuned is {len(tuned):,} bytes.")
+        else:
+            scan.regions = diff_regions(stock, tuned)
+            scan.changed_bytes = changed_byte_count(stock, tuned)
+            if scan.changed_bytes == 0:
+                scan.add("error", "Stock and tuned .bin are identical, "
+                                  "the builder would report 'NO modifications found'.")
+            else:
+                scan.add("info", f"{scan.changed_bytes:,} byte(s) changed in "
+                                 f"{len(scan.regions)} region(s).")
+
+        scan.stock_ids = rom_ids_of(job.stock_bin, stock)
+        scan.tuned_ids = rom_ids_of(job.tuned_bin, tuned)
+        shared_ids = set(scan.stock_ids) & set(scan.tuned_ids)
+        if scan.stock_ids and scan.tuned_ids and not shared_ids:
+            scan.add("warn", "No common software id found in stock and tuned image. The "
+                             "the builder may report a software version mismatch.")
+
+    if has_xdf and definition is None:
+        try:
+            definition = XdfDefinition.load(job.xdf)
+        except ET.ParseError as exc:
+            scan.add("error", f"XDF is not valid XML: {exc}")
+            definition = None
+        except Exception as exc:
+            scan.add("error", f"XDF could not be read: {exc}")
+            definition = None
+
+    if definition is not None:
+        scan.xdf_title = definition.title
+        scan.xdf_tables = definition.table_count
+        scan.add("info", f"XDF '{definition.title}' \u00b7 {definition.table_count} table(s).")
+        if definition.rom_size and scan.file_size and definition.rom_size != scan.file_size:
+            scan.add("warn", f"XDF describes a {human_size(definition.rom_size)} ROM, "
+                             f"the .bin is {human_size(scan.file_size)}.")
+        if scan.regions:
+            for start, length in scan.regions:
+                names = definition.tables_at(start, length, scan.file_size)
+                scan.region_tables.append(names)
+                for name in names:
+                    if name not in scan.touched_tables:
+                        scan.touched_tables.append(name)
+            scan.uncovered = definition.uncovered(scan.regions, scan.file_size)
+            if scan.uncovered:
+                total = sum(length for _, length in scan.uncovered)
+                scan.add("info",
+                         f"{total:,} changed byte(s) in {len(scan.uncovered)} region(s) "
+                         f"are outside this XDF. The builder also carries its own table "
+                         f"definitions, so this is not necessarily a problem, but if it "
+                         f"reports 'Modification not in xdf', these are the offsets.")
+            else:
+                scan.add("info", f"All modifications are covered by the XDF "
+                                 f"({len(scan.touched_tables)} table(s) touched).")
+    if len(scan.region_tables) != len(scan.regions):
+        scan.region_tables = [[] for _ in scan.regions]
+    return scan
+
+
+def preflight(job: LockJob, definition: XdfDefinition = None,
+              scan: FileScan = None) -> Preflight:
+    """Check everything the builder would choke on, before spending a run.
+
+    ``scan`` is a FileScan from an earlier run. When it still fits these files
+    it is folded in and nothing is read; without it the scan happens here, so
+    calling preflight(job) alone behaves exactly as it always did.
+    """
     report = Preflight()
 
     ok_vin, vin, message = validate_vin(job.vin)
@@ -783,7 +1027,7 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
 
     has_stock = _require_file(report, job.stock_bin, "Stock (original) .bin", ".bin")
     has_tuned = _require_file(report, job.tuned_bin, "Tuned .bin", ".bin")
-    has_xdf = _require_file(report, job.xdf, "XDF definition", XDF_EXT)
+    _require_file(report, job.xdf, "XDF definition", XDF_EXT)
     _require_file(report, job.toolkey, "MHD .toolkey", TOOLKEY_EXT)
 
     if job.output_dir and not os.path.isdir(job.output_dir):
@@ -811,67 +1055,19 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
         elif read_vin:
             report.add("info", "VIN matches the customer's read.")
 
-    stock = tuned = b""
-    if has_stock:
-        stock = read_bytes(job.stock_bin)
-    if has_tuned:
-        tuned = read_bytes(job.tuned_bin)
-        report.file_size = len(tuned)
-
-    if stock and tuned:
-        if len(stock) != len(tuned):
-            report.add("error", f"Size mismatch: stock is {len(stock):,} bytes, "
-                                f"tuned is {len(tuned):,} bytes.")
-        else:
-            report.regions = diff_regions(stock, tuned)
-            report.changed_bytes = changed_byte_count(stock, tuned)
-            if report.changed_bytes == 0:
-                report.add("error", "Stock and tuned .bin are identical, "
-                                    "the builder would report 'NO modifications found'.")
-            else:
-                report.add("info", f"{report.changed_bytes:,} byte(s) changed in "
-                                   f"{len(report.regions)} region(s).")
-
-        report.stock_ids = detect_rom_ids(stock)
-        report.tuned_ids = detect_rom_ids(tuned)
-        shared_ids = set(report.stock_ids) & set(report.tuned_ids)
-        if report.stock_ids and report.tuned_ids and not shared_ids:
-            report.add("warn", "No common software id found in stock and tuned image. The "
-                               "the builder may report a software version mismatch.")
-
-    if has_xdf and definition is None:
-        try:
-            definition = XdfDefinition.load(job.xdf)
-        except ET.ParseError as exc:
-            report.add("error", f"XDF is not valid XML: {exc}")
-            definition = None
-        except Exception as exc:
-            report.add("error", f"XDF could not be read: {exc}")
-            definition = None
-
-    if definition is not None:
-        report.xdf_title = definition.title
-        report.xdf_tables = definition.table_count
-        report.add("info", f"XDF '{definition.title}' · {definition.table_count} table(s).")
-        if definition.rom_size and report.file_size and definition.rom_size != report.file_size:
-            report.add("warn", f"XDF describes a {human_size(definition.rom_size)} ROM, "
-                               f"the .bin is {human_size(report.file_size)}.")
-        if report.regions:
-            for start, length in report.regions:
-                for name in definition.tables_at(start, length, report.file_size):
-                    if name not in report.touched_tables:
-                        report.touched_tables.append(name)
-            report.uncovered = definition.uncovered(report.regions, report.file_size)
-            if report.uncovered:
-                total = sum(length for _, length in report.uncovered)
-                report.add("info",
-                           f"{total:,} changed byte(s) in {len(report.uncovered)} region(s) "
-                           f"are outside this XDF. The builder also carries its own table "
-                           f"definitions, so this is not necessarily a problem, but if it "
-                           f"reports 'Modification not in xdf', these are the offsets.")
-            else:
-                report.add("info", f"All modifications are covered by the XDF "
-                                   f"({len(report.touched_tables)} table(s) touched).")
+    if scan is None or not scan.matches(job):
+        scan = scan_files(job, definition)
+    report.file_size = scan.file_size
+    report.changed_bytes = scan.changed_bytes
+    report.regions = scan.regions
+    report.region_tables = scan.region_tables
+    report.touched_tables = scan.touched_tables
+    report.uncovered = scan.uncovered
+    report.stock_ids = scan.stock_ids
+    report.tuned_ids = scan.tuned_ids
+    report.xdf_title = scan.xdf_title
+    report.xdf_tables = scan.xdf_tables
+    report.issues.extend(scan.issues)
     return report
 
 
@@ -1375,14 +1571,21 @@ class LockUI:
         self._worker: threading.Thread | None = None
         self._running = False
         self._stop_event = threading.Event()
-        self._preflight_after = None
         self._drain_id = None
+        # The expensive half of the check, its answer, and which request it
+        # belongs to. A late answer from an overtaken request is dropped.
+        self._scan: FileScan | None = None
+        self._scan_after = None
+        self._scan_thread: threading.Thread | None = None
+        self._queue_thread: threading.Thread | None = None
+        self._scan_generation = 0
+        self._save_after = None
         self._manual: set[str] = set()
         self._job_folder = ""       # which customer folder the VIN belongs to
         self._vin_auto = False      # VIN was resolved, not typed - may be corrected
         self._setting_vin = False
-        self._xdf_cache: tuple[str, float, XdfDefinition] | None = None
         self._log_shown = False
+        self._log_signature = None
         self._batch_counts = {"total": 0, "unresolved": 0, "no_vin": 0}
         self._last_output = ""
         self._traced = False
@@ -1425,26 +1628,55 @@ class LockUI:
         self._batch_refresh()
         # Always, not only with a file in hand: the empty branch is what paints
         # the marks in step 2 grey instead of leaving them white on white.
-        self._resolve_and_check()
-        if not self.var_tuned.get().strip():
+        self._paint_marks()
+        self._recheck()
+        if self.var_tuned.get().strip():
+            self._schedule_scan(delay=0)
+        else:
             self.app.set_status(t("status.waiting_file"))
         if not self._traced:
             self.var_tuned.trace_add("write", lambda *_: self._on_tuned_changed())
             self.var_vin.trace_add("write", lambda *_: self._on_vin_typed())
-            self.var_customer.trace_add("write", lambda *_: self._schedule_preflight())
+            # The customer name is the file name and nothing else. It used to
+            # start a full pre-flight per keystroke, which is a second of the
+            # window standing still for a field that changes no verdict.
+            self.var_customer.trace_add("write", lambda *_: self._save_later())
+            # Only these two change what the search finds, so only these two
+            # throw the scan away.
+            for var in (self.var_cfg_toolkey, self.var_library):
+                var.trace_add("write", lambda *_: self._on_sources_changed())
             for var in (self.var_exe, self.var_args, self.var_timeout,
-                        self.var_cfg_outdir, self.var_template,
-                        self.var_cfg_toolkey, self.var_library):
-                var.trace_add("write", lambda *_: self.save_settings())
+                        self.var_cfg_outdir, self.var_template):
+                var.trace_add("write", lambda *_: self._save_later())
             self._traced = True
         if self._drain_id is None:
-            self._drain_id = self.app.after(120, self._drain_events)
+            self._drain_id = self.app.after(60, self._drain_events)
+
+    def is_busy(self) -> bool:
+        """Is anything still running for this controller?
+
+        Three things can be: the job worker, the file scan and the queue
+        builder. Plus whatever they have already posted and nobody has drawn
+        yet. Used by the tests to wait for the window to be finished.
+        """
+        if self._scan_after is not None:       # a scan is due but not started
+            return True
+        for thread in (self._worker, self._scan_thread, self._queue_thread):
+            if thread is not None and thread.is_alive():
+                return True
+        return not self._events.empty()
 
     def shutdown(self):
         # The queue poller is rearmed every 120 ms. Without this, closing the
         # window leaves one pending call that fires against a widget that is
         # already gone.
-        self._cancel_preflight()
+        self._cancel_scan()
+        if self._save_after:
+            try:
+                self.app.after_cancel(self._save_after)
+            except tk.TclError:
+                pass
+            self._save_after = None
         if self._drain_id is not None:
             try:
                 self.app.after_cancel(self._drain_id)
@@ -1575,6 +1807,7 @@ class LockUI:
 
     def _clear_log(self):
         self.log.clear()
+        self._log_signature = None
         self._hide_log()
 
     def _show_log(self):
@@ -1792,7 +2025,11 @@ class LockUI:
             return
         if not self._setting_vin:
             self._vin_auto = False    # typed by hand: the app stops correcting it
-        self._schedule_preflight()
+        # The VIN changes no byte of the diff, so nothing is read and nothing
+        # is scheduled: the verdict is redrawn from the scan that is already in
+        # hand, here and now.
+        self._save_later()
+        self._recheck()
 
     # ── automatic resolution ────────────────────────────────────────────────
     def _pick_tuned(self):
@@ -1915,66 +2152,260 @@ class LockUI:
         elif self.setup_card.winfo_manager():
             self.setup_card.pack_forget()
 
-    # ── Pre-flight ──────────────────────────────────────────────────────────
-    def _cancel_preflight(self):
-        if self._preflight_after:
+    # ── The check ───────────────────────────────────────────────────────────
+    # It has two halves and they cost wildly different amounts. What the files
+    # decide (read 16 MB, diff them, search both for ids, map them onto the
+    # XDF) is about a second on a real S58 job. What you type decides (is the
+    # VIN 17 characters, does the output folder exist) is a few microseconds.
+    #
+    # Until 3.0.0 both ran together, in the window, 350 ms after every
+    # keystroke in the VIN field. That is the hanging. Now the expensive half
+    # runs on a worker and its answer is kept for as long as the three files
+    # are untouched, and typing only ever runs the cheap half.
+
+    def _cancel_scan(self):
+        if self._scan_after:
             try:
-                self.app.after_cancel(self._preflight_after)
+                self.app.after_cancel(self._scan_after)
             except tk.TclError:
                 pass
-            self._preflight_after = None
+            self._scan_after = None
 
-    def _schedule_preflight(self):
-        self.save_settings()
-        self._cancel_preflight()
+    _cancel_preflight = _cancel_scan      # the old name, still called from _busy
+
+    def _schedule_scan(self, delay=250):
+        """The files changed: throw the old answer away and get a new one."""
+        self._cancel_scan()
+        self._scan = None
         if self._running:
             return
-        self._preflight_after = self.app.after(350, self._resolve_and_check)
+        if delay <= 0:
+            self._start_scan()
+        else:
+            self._scan_after = self.app.after(delay, self._start_scan)
 
-    def _run_preflight(self):
+    def _schedule_preflight(self):
+        """Kept under its old name: something the files decide has changed."""
+        self._save_later()
+        self._schedule_scan()
+
+    def _on_sources_changed(self):
+        """Tool key or library folder: the search finds something else now."""
+        self._save_later()
+        self._schedule_scan()
+
+    def _file_snapshot(self, tuned):
+        """Everything the worker needs, read here so it touches no tk variable."""
+        return {
+            "tuned": tuned,
+            "library": self.config_data.get("library_dir", ""),
+            "toolkey": self.config_data.get("toolkey", ""),
+            "manual": {key: getattr(self, f"var_{key}").get().strip()
+                       for key in ("stock", "xdf", "toolkey") if key in self._manual},
+            "vin": normalise_vin(self.var_vin.get()),
+            "customer": self.var_customer.get().strip(),
+            "output_dir": (self.config_data.get("output_dir", "").strip()
+                           or os.path.dirname(tuned)),
+        }
+
+    def _no_file(self):
+        """Nothing picked: grey marks, no verdict, no work."""
+        self._scan = None
+        self._paint_marks()
+        self.row_tuned.hint.configure(text=t("lock.step1.hint"), fg=ui.TEXT_FAINT)
+        self.var_summary.set(t("status.waiting_file"))
+        self.step_file.set_note("")
+        self.step_check.set_note("")
+        self._paint_steps()
+
+    def _show_file(self, tuned):
+        size = os.path.getsize(tuned)
+        when = datetime.datetime.fromtimestamp(os.path.getmtime(tuned))
+        self.row_tuned.hint.configure(
+            text=t("lock.step1.size", size=human_size(size),
+                   when=f"{when:%d.%m.%Y %H:%M}"), fg=ui.OK)
+
+    def _start_scan(self):
+        """Hand the expensive half to a worker and say so in step 2."""
+        self._scan_after = None
+        if self._running:
+            return
+        self._update_setup_hint()
+        tuned = self.var_tuned.get().strip()
+        if not tuned or not os.path.isfile(tuned):
+            self._no_file()
+            return
+        self._show_file(tuned)
+        self._scan_generation += 1
+        self.step_file.set_state("done")
+        self.step_check.set_state("now")
+        self.step_check.set_note(t("lock.step2.checking"))
+        self.app.set_status(t("status.checking"), "busy")
+        self._scan_thread = threading.Thread(
+            target=self._scan_worker,
+            args=(self._scan_generation, self._file_snapshot(tuned)), daemon=True)
+        self._scan_thread.start()
+
+    def _scan_worker(self, generation, snapshot):
+        """Off the window. Touches no widget and no tk variable, only the
+        snapshot it was handed."""
+        try:
+            found = resolve_inputs(snapshot["tuned"], snapshot["library"],
+                                   snapshot["toolkey"])
+            job = self._job_from(snapshot, found)
+            scan = scan_files(job, definition_for(job.xdf))
+        except Exception as exc:                       # never take the app down
+            self._post("scan", generation=generation, error=str(exc))
+            return
+        self._post("scan", generation=generation, found=found, scan=scan)
+
+    @staticmethod
+    def _job_from(snapshot, found) -> LockJob:
+        manual = snapshot["manual"]
+        return LockJob(
+            customer=snapshot["customer"], vin=snapshot["vin"],
+            stock_bin=manual.get("stock") or found.stock,
+            tuned_bin=snapshot["tuned"],
+            xdf=manual.get("xdf") or found.xdf,
+            toolkey=manual.get("toolkey") or found.toolkey,
+            output_dir=snapshot["output_dir"])
+
+    def _on_event_scan(self, generation, found=None, scan=None, error=""):
+        if generation != self._scan_generation:
+            return                                      # a newer answer is coming
+        if error:
+            self._show_log()
+            self.log.set_text(error, "error")
+            self.step_check.set_state("err")
+            self.app.set_status(t("word.failed"), "error")
+            return
+        self._apply_resolution(found)
+        self._scan = scan
+        self._recheck()
+
+    def _apply_resolution(self, found):
+        for key in ("stock", "xdf", "toolkey"):
+            if key not in self._manual:
+                getattr(self, f"var_{key}").set(getattr(found, key))
+        # A resolved VIN fills an empty field and corrects an earlier resolved one;
+        # a VIN typed by hand is left alone (the check warns if it disagrees).
+        if found.vin and (self._vin_auto or not self.var_vin.get().strip()):
+            if found.vin != self.var_vin.get():
+                self._set_vin(found.vin)
+            self._vin_auto = True
+        if found.rom_id:
+            self.step_file.set_note(f"ROM {found.rom_id}")
+        self._paint_marks()
+        for note in found.notes:
+            self._show_log()
+            self.log.write(f" ! {note}", "warn")
+
+    def _paint_marks(self):
+        """The four chips in step 2, from what is resolved right now."""
+        for key in ("stock", "xdf", "toolkey"):
+            path = getattr(self, f"var_{key}").get().strip()
+            self._mark(key, bool(path) and os.path.isfile(path),
+                       os.path.basename(path) if key == "xdf" and path else "")
+        exe = self.config_data.get("builder_exe", "")
+        self._mark("builder", bool(exe) and os.path.isfile(exe))
+        missing = [k for k in ("stock", "xdf", "toolkey") if not self._resolved(k)]
+        self.manual.set_title(t("lock.step2.manual") +
+                              (f"  ({len(missing)} {t('word.missing')})" if missing else ""))
+
+    def _recheck(self):
+        """The cheap half. Reads no file, so it is safe on every keystroke."""
         job = self._current_job()
-        ok_vin, vin, vin_msg = validate_vin(job.vin)
+        ok_vin, _vin, vin_msg = validate_vin(job.vin)
         self.lbl_vin.config(text=("\u2713  " if ok_vin else "\u2715  ") + vin_msg,
                             fg=ui.OK if ok_vin else (ui.TEXT_FAINT if not job.vin else ui.ERR))
-        if not (job.stock_bin and job.tuned_bin and os.path.isfile(job.stock_bin)
-                and os.path.isfile(job.tuned_bin)):
+        if self._scan is not None and self._scan.matches(job):
+            report = preflight(job, scan=self._scan)
+            self._render_preflight(report, job)
+            return report
+        if not (job.tuned_bin and os.path.isfile(job.tuned_bin)):
+            self.var_summary.set(t("status.waiting_file"))
+        else:
             self.var_summary.set(t("lock.step2.idle"))
-            self._paint_steps()
+        self._paint_steps()
+        return None
+
+    def check_now(self):
+        """Resolve and check right here, on this thread.
+
+        The window never calls this, it would hang. Re-check and the tests do,
+        because they want the answer before the next line runs.
+        """
+        self._cancel_scan()
+        if self._running:
             return None
-        report = preflight(job, self._definition(job.xdf))
-        self._render_preflight(report, job)
-        return report
+        self._update_setup_hint()
+        tuned = self.var_tuned.get().strip()
+        if not tuned or not os.path.isfile(tuned):
+            self._no_file()
+            return None
+        self._show_file(tuned)
+        self._scan_generation += 1
+        snapshot = self._file_snapshot(tuned)
+        try:
+            found = resolve_inputs(tuned, snapshot["library"], snapshot["toolkey"])
+        except OSError as exc:
+            self._show_log()
+            self.log.set_text(str(exc), "error")
+            return None
+        self._apply_resolution(found)
+        job = self._current_job()
+        self._scan = scan_files(job, definition_for(job.xdf))
+        return self._recheck()
+
+    def _resolve_and_check(self, force=False):
+        """The old name of check_now. Still used by Re-check and the tests."""
+        return self.check_now()
+
+    def _run_preflight(self):
+        return self._recheck()
 
     def _render_preflight(self, report: Preflight, job: LockJob):
         self._show_log()
-        self.log.clear()
-        self.log.write("PRE-FLIGHT CHECKS", "dim")
-        self.log.write("\u2500" * 62, "dim")
+        # Built as a list and written in one call. As sixty separate writes this
+        # cost a tenth of a second, and it happens on every keystroke.
+        lines = [("PRE-FLIGHT CHECKS", "dim"), ("\u2500" * 62, "dim")]
         for issue in report.issues:
+            # The VIN has its own line under its own field in step 3. Leaving it
+            # out here is not only tidier: it is what makes the log identical
+            # from one keystroke to the next, so it is not rewritten at all.
+            if issue.topic == "vin":
+                continue
             tag = {"error": "error", "warn": "warn"}.get(issue.level, "info")
             mark = {"error": "\u2715", "warn": "!", "info": "\u00b7"}[issue.level]
-            self.log.write(f" {mark} {issue.text}", tag)
+            lines.append((f" {mark} {issue.text}", tag))
         if report.regions:
-            definition = self._definition(job.xdf)
-            self.log.write("")
-            self.log.write(f"MODIFIED REGIONS ({len(report.regions)})", "dim")
-            self.log.write("\u2500" * 62, "dim")
-            for start, length in report.regions[:25]:
-                names = definition.tables_at(start, length, report.file_size) if definition else []
+            lines.append(("", None))
+            lines.append((f"MODIFIED REGIONS ({len(report.regions)})", "dim"))
+            lines.append(("\u2500" * 62, "dim"))
+            # The names came with the scan, so nothing here reopens the XDF.
+            tables = report.region_tables or [[] for _ in report.regions]
+            for index, (start, length) in enumerate(report.regions[:25]):
+                names = tables[index] if index < len(tables) else []
                 label = ", ".join(names[:2]) if names else "not in this XDF"
-                self.log.write(f"  0x{start:07X}  {length:>6,} B   {label[:64]}",
-                               "accent" if names else "warn")
+                lines.append((f"  0x{start:07X}  {length:>6,} B   {label[:64]}",
+                              "accent" if names else "warn"))
             if len(report.regions) > 25:
-                self.log.write(f"  \u2026 and {len(report.regions) - 25} more region(s)", "dim")
+                lines.append((f"  \u2026 and {len(report.regions) - 25} more region(s)",
+                              "dim"))
         if report.touched_tables:
-            self.log.write("")
-            self.log.write(f"TABLES TOUCHED ({len(report.touched_tables)})", "dim")
-            self.log.write("\u2500" * 62, "dim")
+            lines.append(("", None))
+            lines.append((f"TABLES TOUCHED ({len(report.touched_tables)})", "dim"))
+            lines.append(("\u2500" * 62, "dim"))
             for name in report.touched_tables[:20]:
-                self.log.write(f"  \u00b7 {name[:70]}")
+                lines.append((f"  \u00b7 {name[:70]}", None))
             if len(report.touched_tables) > 20:
-                self.log.write(f"  \u2026 and {len(report.touched_tables) - 20} more", "dim")
-        self.log.scroll_top()
+                lines.append((f"  \u2026 and {len(report.touched_tables) - 20} more", "dim"))
+        # Only the log is skipped when the files still say the same thing. The
+        # verdict below it is redrawn every time, because the VIN is part of it.
+        signature = tuple(lines)
+        if signature != self._log_signature:
+            self._log_signature = signature
+            self.log.set_all(lines)
 
         if report.ok:
             note = t("lock.step2.note", bytes=f"{report.changed_bytes:,}".replace(",", "."),
@@ -2032,8 +2463,29 @@ class LockUI:
             "language": self.config_data.get("language", DEFAULT_CONFIG["language"]),
         }
 
+    def _save_later(self, delay=600):
+        """Write the settings once the typing stops, not once per keystroke."""
+        if self._save_after:
+            try:
+                self.app.after_cancel(self._save_after)
+            except tk.TclError:
+                pass
+        self._save_after = self.app.after(delay, self.save_settings)
+
     def save_settings(self):
-        self.config_data.update(self._collect_settings())
+        if self._save_after:
+            try:
+                self.app.after_cancel(self._save_after)
+            except tk.TclError:
+                pass
+            self._save_after = None
+        collected = self._collect_settings()
+        if collected == self.config_data:
+            # Nothing actually changed. Typing a VIN reaches here every time
+            # through the debounce, and writing the file plus refreshing the
+            # buttons for no reason is a visible pause a second after you stop.
+            return
+        self.config_data.update(collected)
         self.app.config_data = self.config_data
         ok = save_config(self.config_data)
         self.var_settings_summary.set(t("settings.saved") if ok
@@ -2111,18 +2563,9 @@ class LockUI:
         )
 
     def _definition(self, path: str) -> XdfDefinition | None:
-        """Parse the XDF once and reuse it while the file does not change."""
-        if not path or not os.path.isfile(path):
-            return None
-        stamp = os.path.getmtime(path)
-        if self._xdf_cache and self._xdf_cache[0] == path and self._xdf_cache[1] == stamp:
-            return self._xdf_cache[2]
-        try:
-            definition = XdfDefinition.load(path)
-        except Exception:
-            return None
-        self._xdf_cache = (path, stamp, definition)
-        return definition
+        """The parsed XDF. Shared with the worker, so it is normally already
+        there by the time the window asks."""
+        return definition_for(path)
 
     # ── Running ─────────────────────────────────────────────────────────────
     def _busy(self, busy: bool):
@@ -2140,7 +2583,7 @@ class LockUI:
 
     def _on_lock(self):
         job = self._current_job()
-        report = preflight(job, self._definition(job.xdf))
+        report = preflight(job, self._definition(job.xdf), scan=self._scan)
         self._render_preflight(report, job)
         if not report.ok:
             self.lock_page.banner.show("error", t("status.blocked"))
@@ -2198,7 +2641,7 @@ class LockUI:
     def _on_stage_only(self):
         """Build the working folder without running anything, for a manual run."""
         job = self._current_job()
-        report = preflight(job, self._definition(job.xdf))
+        report = preflight(job, self._definition(job.xdf), scan=self._scan)
         self._render_preflight(report, job)
         if not report.ok:
             self.lock_page.banner.show("error", t("status.blocked"))
@@ -2407,7 +2850,7 @@ class LockUI:
                     handler(**payload)
         except queue.Empty:
             pass
-        self._drain_id = self.app.after(120, self._drain_events)
+        self._drain_id = self.app.after(60, self._drain_events)
 
     def _on_event_log(self, target, line, tag):
         if target == "batch":
@@ -2525,12 +2968,28 @@ class LockUI:
             filetypes=[("ROM image", "*.bin"), ("All files", "*.*")])
         if not paths:
             return
-        base = self._current_job()
-        unresolved = 0
-        inherited = 0
+        # Every file gets its own stock ROM and XDF looked up, and that means
+        # reading it. Twenty files used to be twenty freezes of the window.
+        self.step_files.set_state("now")
+        self.step_files.set_note(t("lock.step2.checking"))
+        self.app.set_status(t("status.checking"), "busy")
+        snapshot = {"library": self.config_data.get("library_dir", ""),
+                    "toolkey": self.config_data.get("toolkey", ""),
+                    "base": self._current_job()}
+        self._queue_thread = threading.Thread(
+            target=self._queue_worker, args=(list(paths), snapshot), daemon=True)
+        self._queue_thread.start()
+
+    def _queue_worker(self, paths, snapshot):
+        """Off the window. Builds jobs out of plain values, touches no widget."""
+        base = snapshot["base"]
+        jobs, unresolved, inherited = [], 0, 0
         for path in paths:
-            found = resolve_inputs(path, self.config_data.get("library_dir", ""),
-                                   self.config_data.get("toolkey", ""))
+            try:
+                found = resolve_inputs(path, snapshot["library"], snapshot["toolkey"])
+            except Exception:
+                unresolved += 1
+                continue
             if not found.vin and base.vin:
                 inherited += 1
             job = LockJob(
@@ -2543,23 +3002,29 @@ class LockUI:
                 output_dir=base.output_dir)
             if not (job.stock_bin and job.xdf):
                 unresolved += 1
-            self.batch_jobs.append(job)
+            jobs.append(job)
+        self._post("queued", jobs=jobs, added=len(paths), unresolved=unresolved,
+                   inherited=inherited, base_vin=base.vin)
+
+    def _on_event_queued(self, jobs, added, unresolved, inherited, base_vin):
+        self.batch_jobs.extend(jobs)
         missing_vin = [j for j in self.batch_jobs if not validate_vin(j.vin)[0]]
         self._batch_counts = {"total": len(self.batch_jobs),
                               "unresolved": unresolved,
                               "no_vin": len(missing_vin)}
         self._batch_refresh()
-        self.batch_log.write(f"+ {len(paths)}", "ok", follow=True)
+        self.batch_log.write(f"+ {added}", "ok", follow=True)
         if unresolved:
             self.batch_log.write(f" ! {unresolved} without a stock ROM or XDF",
                                  "warn", follow=True)
         if inherited:
             # one VIN across several cars locks them all to the first one
             self.batch_log.write(f" ! {inherited} carry no VIN of their own and took "
-                                 f"{base.vin} from the Lock page", "warn", follow=True)
+                                 f"{base_vin} from the Lock page", "warn", follow=True)
         if missing_vin:
             self.batch_log.write(f" ! {len(missing_vin)} still need a VIN",
                                  "warn", follow=True)
+        self.app.set_status(t("word.ready"), "ok")
 
     def _batch_import_csv(self):
         path = filedialog.askopenfilename(title=t("dlg.csv"),

@@ -64,7 +64,7 @@ if dme_text.language() != other:
     problems.append(f"language is {dme_text.language()}, not {other}")
 if app.shell.active != "batch":
     problems.append(f"the area changed to {app.shell.active}")
-if app.shell.nav._items["lock"]._label.cget("text") != dme_text.t("nav.lock"):
+if app.shell.nav.label_of("lock") != dme_text.t("nav.lock"):
     problems.append("the navigation kept the old words")
 if lock.var_tuned.get() != TUNED:
     problems.append("the tuned file was lost")
@@ -96,7 +96,7 @@ app.update()
 lock = app.lock
 if lock.var_vin.get() != "WBS21DM0408F91146":
     problems.append("the VIN was lost on the way back")
-if dme_text.t("nav.lock") != app.shell.nav._items["lock"]._label.cget("text"):
+if dme_text.t("nav.lock") != app.shell.nav.label_of("lock"):
     problems.append("the navigation did not come back")
 
 app.destroy()

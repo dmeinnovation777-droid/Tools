@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-3.0.0.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-3.1.0.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -23,6 +23,54 @@ ein Uninstaller.
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Was 3.1.0 anders macht
+
+**Das Fenster hängt nicht mehr.** Die Vorprüfung lief bis 3.0.0 im
+Fensterthread, 350 ms nach jedem Tastendruck im VIN Feld: 16 MB lesen, die
+Unterschiede suchen, beide Images nach Program IDs durchsuchen, alles auf die
+XDF legen. Auf einer echten 8 MB S58 Datei sind das rund **0,8 Sekunden**, und
+eine VIN hat siebzehn Zeichen.
+
+Jetzt ist die Prüfung geteilt. Was die Dateien entscheiden, läuft auf einem
+Nebenläufer und wird behalten, solange die drei Dateien unangetastet bleiben.
+Was Du tippst, wird sofort geprüft, ohne ein einziges Byte zu lesen. Gemessen,
+an genau so einer 8 MB Datei:
+
+| | 3.0.0 | 3.1.0 |
+| --- | --- | --- |
+| ein Tastendruck im VIN Feld | rund 800 ms Stillstand | **2,5 ms** |
+| eine Datei auswählen | rund 800 ms Stillstand | **17 ms** |
+| Kundenname tippen | löste die ganze Prüfung aus | löst nichts aus |
+
+Dazu ist die Rechnerei selbst schneller geworden: die geänderten Bytes werden
+nicht mehr einzeln in Python gezählt, sondern blockweise in C, **0,04 statt
+0,28 Sekunden**. Ein Image wird einmal gelesen und einmal durchsucht, nicht bei
+jeder Prüfung neu. Und im Stapel wird die Zuordnung je Datei ebenfalls
+nebenläufig gemacht, statt das Fenster zwanzigmal anzuhalten.
+
+**Es bewegt sich etwas.** Bis 3.0.0 sprang alles um: die Seite, der Schalter,
+die Pille in der Leiste, der Ring an einem Schritt. Jetzt gleitet die Seite beim
+Wechsel herein, die Pille wandert von Wort zu Wort, der Schalter schiebt seinen
+Knopf hinüber, und ein Ring blendet seine Farbe über. Gemessen bei über 100
+Bildern je Sekunde.
+
+**Das Scrollen gleitet und läuft aus.** Das Rad sprang bisher zeilenweise. Jetzt
+gibt eine Rastung dem Inhalt einen Schwung, der ausklingt, rund 130 Pixel in
+einer halben Sekunde. Und es funktioniert überall auf der Seite: bisher hörte
+das Rad auf zu wirken, sobald der Zeiger über einem Text stand, weil die
+Bindung an einer Stelle hing, die der Zeiger dabei verlässt. Über dem
+Protokollfenster und über der Tabelle scrollt jetzt das, worüber der Zeiger
+steht, und sonst die Seite.
+
+**Das Fenster vergrößern ruckelt nicht mehr.** Jeder Pixel einer Ziehbewegung
+ließ jeden umbrechenden Text auf allen vier Seiten neu umbrechen. Das passiert
+jetzt einmal, fünfzig Millisekunden nachdem Du losgelassen hast.
+
+Am Motor hat sich wieder nichts geändert: Auflösung, Vorprüfung, Staging, der
+Aufruf des Builders und das Zusammenführen der Backups liefern dasselbe wie in
+3.0.0. Ein Test vergleicht die neue Zählung der geänderten Bytes gegen die alte
+auf dreihundert Zufallspaaren, damit das so bleibt.
 
 ## Was 3.0.0 anders macht
 

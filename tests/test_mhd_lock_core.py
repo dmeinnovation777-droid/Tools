@@ -1,6 +1,8 @@
 """Unit tests for the MHD Lock Tool core (no GUI / no vendor tool needed)."""
 
 import os
+import shutil
+import random
 import sys
 import tempfile
 import time
@@ -496,6 +498,170 @@ class TestMissingSetup(unittest.TestCase):
     def test_nothing_missing_once_both_are_set(self):
         config = dict(m.DEFAULT_CONFIG, builder_exe=self.exe, toolkey=self.key)
         self.assertEqual(m.missing_setup(config), [])
+
+
+class TestTheScanIsTheExpensiveHalf(unittest.TestCase):
+    """preflight was split so the window can run the costly half elsewhere.
+
+    The split is only worth anything if it changed nothing: the same job has to
+    come out with the same verdict whether the scan is handed in or done on the
+    spot. And a scan from other files may never be believed.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        d = self.tmp.name
+        self.stock = write(os.path.join(d, "00005C64_original.bin"), bytes(0x1000))
+        tuned = bytearray(0x1000)
+        tuned[0x100:0x104] = b"\x11\x22\x33\x44"
+        self.tuned = write(os.path.join(d, "customer tune v2.bin"), bytes(tuned))
+        self.xdf = write(os.path.join(d, "00005C64.xdf"), SAMPLE_XDF)
+        self.key = write(os.path.join(d, "Gen.toolkey"), b"\x00" * 128)
+        self.job = m.LockJob(customer="Kunde", vin="DMETEST0000000001",
+                             stock_bin=self.stock, tuned_bin=self.tuned,
+                             xdf=self.xdf, toolkey=self.key, output_dir=d)
+        m.forget_files()
+        self.addCleanup(m.forget_files)
+
+    @staticmethod
+    def shape(report):
+        return ([(i.level, i.text, i.topic) for i in report.issues],
+                report.changed_bytes, report.regions, report.touched_tables,
+                report.uncovered, report.stock_ids, report.tuned_ids,
+                report.xdf_title, report.xdf_tables, report.file_size, report.vin)
+
+    def test_handing_in_a_scan_gives_the_same_report(self):
+        scan = m.scan_files(self.job)
+        self.assertEqual(self.shape(m.preflight(self.job, scan=scan)),
+                         self.shape(m.preflight(self.job)))
+
+    def test_a_scan_of_other_files_is_not_believed(self):
+        other = m.LockJob(**dict(vars(self.job), tuned_bin=self.stock))
+        stale = m.scan_files(other)
+        self.assertFalse(stale.matches(self.job))
+        # It is refused and the real scan runs, so the verdict is still right.
+        report = m.preflight(self.job, scan=stale)
+        self.assertTrue(report.ok, [str(i) for i in report.issues])
+        self.assertEqual(report.changed_bytes, 4)
+
+    def test_a_scan_goes_stale_when_a_file_changes(self):
+        scan = m.scan_files(self.job)
+        self.assertTrue(scan.matches(self.job))
+        os.utime(self.tuned, (0, 0))
+        self.assertFalse(scan.matches(self.job))
+
+    def test_the_scan_does_not_look_at_anything_typed(self):
+        """VIN and customer are step 3 and the file name, never the diff."""
+        first = m.scan_files(self.job)
+        self.job.vin = "WBS21DM0408F91146"
+        self.job.customer = "somebody else"
+        self.assertTrue(first.matches(self.job))
+
+    def test_the_scan_still_reports_a_broken_xdf(self):
+        broken = write(os.path.join(self.tmp.name, "bad.xdf"), "<XDFFORMAT><oops>")
+        self.job.xdf = broken
+        report = m.preflight(self.job)
+        self.assertFalse(report.ok)
+        self.assertTrue(any("XDF" in i.text for i in report.errors))
+
+
+class TestCountingDifferences(unittest.TestCase):
+    """The count moved from a Python byte loop into two C calls per block.
+
+    On the 8 MB pair from a real S58 job that is 0.04 s instead of 0.28 s, and
+    it used to run 350 ms after every keystroke in the VIN field. The answer
+    may not have changed by a single byte, so it is checked against the loop
+    it replaced.
+    """
+
+    @staticmethod
+    def loop(a, b):
+        shared = min(len(a), len(b))
+        return (sum(1 for x, y in zip(a[:shared], b[:shared]) if x != y)
+                + abs(len(b) - len(a)))
+
+    def test_agrees_with_the_byte_loop_on_random_pairs(self):
+        rng = random.Random(7)
+        for _ in range(300):
+            a = bytes(rng.randrange(256) for _ in range(rng.randrange(0, 40)))
+            b = bytes(rng.randrange(256) for _ in range(rng.randrange(0, 40)))
+            self.assertEqual(m.changed_byte_count(a, b), self.loop(a, b), (a, b))
+
+    def test_counts_across_a_block_edge(self):
+        """The blocks are 4096 bytes; a difference on the seam must still count."""
+        for size in (4095, 4096, 4097, 8192):
+            data = bytes(range(256)) * (size // 256 + 1)
+            a = data[:size]
+            b = bytearray(a)
+            b[-1] ^= 0xFF
+            b[0] ^= 0xFF
+            self.assertEqual(m.changed_byte_count(a, bytes(b)), 2, size)
+
+    def test_a_longer_tuned_file_counts_its_tail(self):
+        self.assertEqual(m.changed_byte_count(b"abc", b"abcde"), 2)
+        self.assertEqual(m.changed_byte_count(b"abcde", b"abc"), 2)
+
+    def test_identical_images_count_nothing(self):
+        data = bytes(range(256)) * 64
+        self.assertEqual(m.changed_byte_count(data, data), 0)
+
+    def test_empty(self):
+        self.assertEqual(m.changed_byte_count(b"", b""), 0)
+        self.assertEqual(m.changed_byte_count(b"", b"ab"), 2)
+
+
+class TestWhatIsRemembered(unittest.TestCase):
+    """Reading an 8 MB image and searching it for ids cost about half a second
+    each. Neither may happen twice while the file has not changed, and neither
+    may serve a stale answer once it has."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.folder, True)
+        self.path = os.path.join(self.folder, "rom.bin")
+        self.write(b"\x00" * 32 + b"00005C6414C808" + b"\x00" * 32)
+        m.forget_files()
+        self.addCleanup(m.forget_files)
+
+    def write(self, data):
+        with open(self.path, "wb") as handle:
+            handle.write(data)
+
+    def test_a_second_read_comes_from_memory(self):
+        first = m.read_bytes(self.path)
+        self.assertIs(m.read_bytes(self.path), first)
+
+    def test_a_changed_file_is_read_again(self):
+        first = m.read_bytes(self.path)
+        os.utime(self.path, (0, 0))          # a different stamp
+        self.write(b"different")
+        second = m.read_bytes(self.path)
+        self.assertIsNot(second, first)
+        self.assertEqual(second, b"different")
+
+    def test_ids_are_searched_once(self):
+        calls = []
+        original = m.detect_rom_ids
+        m.detect_rom_ids = lambda data, limit=12: (calls.append(1),
+                                                   original(data, limit))[1]
+        try:
+            first = m.rom_ids_of(self.path)
+            again = m.rom_ids_of(self.path)
+        finally:
+            m.detect_rom_ids = original
+        self.assertEqual(first, again)
+        self.assertIn("00005C6414C808", first)
+        self.assertEqual(len(calls), 1, "the image was searched twice")
+
+    def test_ids_are_searched_again_after_a_change(self):
+        self.assertIn("00005C6414C808", m.rom_ids_of(self.path))
+        os.utime(self.path, (0, 0))
+        self.write(b"\x00" * 32 + b"1A73B0FE2288C1" + b"\x00" * 32)
+        self.assertIn("1A73B0FE2288C1", m.rom_ids_of(self.path))
+
+    def test_a_missing_file_does_not_raise(self):
+        self.assertEqual(m.rom_ids_of(os.path.join(self.folder, "gone.bin"), b""), [])
 
 
 class TestBuilderOutput(unittest.TestCase):

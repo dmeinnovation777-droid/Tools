@@ -101,13 +101,15 @@ def build_fixture():
 
 
 def wait_for_worker(lock, timeout=60):
+    """Wait until nothing is running any more and everything is drawn."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         app.update()
-        if not (lock._worker and lock._worker.is_alive()) and lock._events.empty():
+        if not lock.is_busy():
+            app.update()
             app.update()
             return True
-        time.sleep(0.05)
+        time.sleep(0.03)
     return False
 
 
@@ -209,7 +211,9 @@ app.tabs.select("batch")
 app.update()
 m.filedialog.askopenfilenames = lambda **k: (os.path.join(CAR, "MAP1 E45 MAP2 E30 v3.bin"),)
 lock._batch_add_files()
-app.update()
+# The lookup per file runs on a worker now, so the window stays alive while it
+# happens and the queue fills when it is done.
+assert wait_for_worker(lock), "the queue was not built"
 assert len(lock.batch_jobs) == 1 and lock.batch_jobs[0].stock_bin.endswith("_original.bin")
 lock._on_batch_run()
 assert wait_for_worker(lock, timeout=90), "batch did not finish"

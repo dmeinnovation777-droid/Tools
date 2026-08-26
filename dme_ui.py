@@ -13,6 +13,7 @@ the embedded logo in dme_brand.py.
 import os
 import subprocess
 import sys
+import time
 import tkinter as tk
 from tkinter import font as tkfont
 
@@ -154,6 +155,7 @@ def init(root) -> None:
         "mono_lg": (mono, 10),
     })
     _install_ttk(root)
+    install_wheel(root)
 
 
 def f(name: str):
@@ -248,11 +250,20 @@ def round_corners(widget, radius=None, outer_bg=BG, border=None):
                               outline=border, width=1)
         corners.append(canvas)
 
+    # Placed with relx/rely, so tk keeps them in their corners by itself as the
+    # widget grows. The only thing a resize can change is whether they fit at
+    # all, and that answer is acted on once, not once per pixel of a drag.
+    hidden = [None]
+
     def place(_=None):
         # A corner wider than half the widget would paint the whole thing in
         # the outer colour and the widget would simply vanish. It happened.
         width, height = widget.winfo_width(), widget.winfo_height()
-        if width > 1 and height > 1 and radius * 2 > min(width, height):
+        hide = width > 1 and height > 1 and radius * 2 > min(width, height)
+        if hide == hidden[0]:
+            return
+        hidden[0] = hide
+        if hide:
             for corner in corners:
                 corner.place_forget()
             return
@@ -279,6 +290,142 @@ def outlined(parent, fill=CARD, border=BORDER_SOFT, radius=12, bg=None):
     return box
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Motion
+# ─────────────────────────────────────────────────────────────────────────────
+# Until 3.1.0 nothing in this app moved. Every state change was a hard swap:
+# the page, the switch, the pill in the bar, the ring on a step. That is the
+# difference you feel against a phone, and most of it is fixable, because the
+# things that have to move are drawn on canvases and tk moves those quickly.
+#
+# What is NOT fixable here: there is no compositor, so there is no cross fade
+# and no blur. Where a phone dissolves, this slides.
+
+FRAME_MS = 16          # about 60 a second, which is what tk manages
+
+
+def ease_out(t: float) -> float:
+    """Fast at the start, gentle at the end. The curve a phone uses."""
+    return 1.0 - (1.0 - t) ** 3
+
+
+def ease_in_out(t: float) -> float:
+    return 4 * t * t * t if t < 0.5 else 1 - (-2 * t + 2) ** 3 / 2
+
+
+# Every tween that is in flight. A window that closes mid animation would
+# otherwise leave a pending after() calling into a widget that is gone, and Tcl
+# prints that on the console.
+_RUNNING: set = set()
+
+
+def stop_animations():
+    """Cancel everything in flight. Called before a window goes away."""
+    for animation in list(_RUNNING):
+        animation.cancel()
+    _RUNNING.clear()
+
+
+class Animation:
+    """One running tween. Keep it to cancel it."""
+
+    def __init__(self, widget, ms, step, done=None, ease=ease_out):
+        self._widget = widget
+        self._ms = max(1, ms)
+        self._step = step
+        self._done = done
+        self._ease = ease
+        self._after = None
+        self._start = time.perf_counter()
+        _RUNNING.add(self)
+        self._tick()
+
+    def _tick(self):
+        # Real time, not a frame counter: a dropped frame must not stretch the
+        # curve, it must skip a piece of it.
+        elapsed = (time.perf_counter() - self._start) * 1000.0
+        fraction = min(1.0, elapsed / self._ms)
+        try:
+            self._step(self._ease(fraction))
+        except tk.TclError:
+            _RUNNING.discard(self)
+            return                        # the widget went away mid flight
+        if fraction >= 1.0:
+            self._after = None
+            _RUNNING.discard(self)
+            if self._done:
+                self._done()
+            return
+        try:
+            self._after = self._widget.after(FRAME_MS, self._tick)
+        except tk.TclError:
+            self._after = None
+
+    def cancel(self):
+        _RUNNING.discard(self)
+        if self._after is not None:
+            try:
+                self._widget.after_cancel(self._after)
+            except tk.TclError:
+                pass
+            self._after = None
+
+    @property
+    def running(self):
+        return self._after is not None
+
+
+def animate(widget, ms, step, done=None, ease=ease_out, previous=None):
+    """Run `step(fraction)` for `ms`, then `done()`. Cancels `previous` first."""
+    if previous is not None:
+        previous.cancel()
+    return Animation(widget, ms, step, done, ease)
+
+
+def mix(first: str, second: str, fraction: float) -> str:
+    """A colour between two hex colours. Used to fade a fill instead of
+    swapping it, since tk cannot fade a whole widget."""
+    fraction = 0.0 if fraction < 0 else (1.0 if fraction > 1 else fraction)
+    a = (int(first[1:3], 16), int(first[3:5], 16), int(first[5:7], 16))
+    b = (int(second[1:3], 16), int(second[3:5], 16), int(second[5:7], 16))
+    return "#%02X%02X%02X" % tuple(
+        int(round(x + (y - x) * fraction)) for x, y in zip(a, b))
+
+
+def on_resize(widget, callback, delay=50):
+    """Run `callback(width, height)` once the resizing stops.
+
+    A window drag fires <Configure> for every pixel. Every wrapped label in the
+    app used to answer each one, on all four pages at once, because all four are
+    mounted. That is what made dragging the window edge feel like wading. Fifty
+    milliseconds after the last pixel is soon enough to look instant and rare
+    enough to cost nothing.
+    """
+    state = {"after": None, "size": None}
+
+    def fire():
+        state["after"] = None
+        if state["size"]:
+            callback(*state["size"])
+
+    def configured(event):
+        if event.width <= 1:
+            return
+        size = (event.width, event.height)
+        if size == state["size"]:
+            return
+        state["size"] = size
+        if state["after"] is not None:
+            try:
+                widget.after_cancel(state["after"])
+            except tk.TclError:
+                pass
+        state["after"] = widget.after(delay, fire)
+
+    widget.bind("<Configure>", configured, add="+")
+    return state
+
+
 def wrap_to_parent(label, minimum=None, inset=None):
     """Keep a label's wraplength equal to the width it actually gets.
 
@@ -295,22 +442,17 @@ def wrap_to_parent(label, minimum=None, inset=None):
     parent = label.master
     last = [None]
 
-    def resize(event):
-        # A frame reports width 1 for the instant between being created and
-        # being laid out. Wrapping to that makes the label tall, and everything
-        # under it drops - the jump you see is the correction.
-        if event.width <= 1:
-            return
+    def resize(width, _height):
         taken = gap() if callable(gap) else gap
-        width = max(floor, event.width - taken)
+        wrap = max(floor, width - taken)
         # tk lays the whole branch out again on every configure(), even one
         # that changes nothing. Only a width that is really new is worth that.
-        if width == last[0]:
+        if wrap == last[0]:
             return
-        last[0] = width
-        label.configure(wraplength=width)
+        last[0] = wrap
+        label.configure(wraplength=wrap)
 
-    parent.bind("<Configure>", resize, add="+")
+    on_resize(parent, resize)
     return label
 
 
@@ -356,8 +498,12 @@ class Switch(tk.Canvas):
         self.bind("<Button-1>", lambda _e: self.toggle())
         self.bind("<Return>", lambda _e: self.toggle())
         self.bind("<space>", lambda _e: self.toggle())
+        # Where the knob is right now, 0 left and 1 right. Not the same thing
+        # as the value: between a click and 160 ms later it is in between.
+        self._pos = 1.0 if bool(self._var.get()) else 0.0
+        self._motion = None
         self.bind("<Configure>", lambda _e: self._draw())
-        self._trace = self._var.trace_add("write", lambda *_: self._draw())
+        self._trace = self._var.trace_add("write", lambda *_: self._glide())
         self._draw()
 
     def toggle(self):
@@ -367,21 +513,33 @@ class Switch(tk.Canvas):
         if self._command:
             self._command()
 
+    def _glide(self):
+        target = 1.0 if bool(self._var.get()) else 0.0
+        if abs(target - self._pos) < 0.001:
+            return
+        origin = self._pos
+
+        def step(fraction):
+            self._pos = origin + (target - origin) * fraction
+            self._draw()
+
+        self._motion = animate(self, 160, step, previous=self._motion)
+
     def _draw(self):
         self.delete("all")
         w, h = self._track_w, self._track_h
-        on = bool(self._var.get())
         if self._state == "disabled":
             track, knob = CARD_ALT, BORDER_SOFT
         else:
-            track, knob = (ACCENT if on else BORDER), "#FFFFFF"
+            # The track colours travel with the knob instead of snapping.
+            track, knob = mix(BORDER, ACCENT, self._pos), "#FFFFFF"
         r = h / 2
         self.create_oval(0, 0, h, h, fill=track, outline=track)
         self.create_oval(w - h, 0, w, h, fill=track, outline=track)
         self.create_rectangle(r, 0, w - r, h, fill=track, outline=track)
         pad = max(1, px(2))
         d = h - 2 * pad
-        x = (w - pad - d) if on else pad
+        x = pad + (w - 2 * pad - d) * self._pos
         self.create_oval(x, pad, x + d, pad + d, fill=knob, outline=BORDER_SOFT)
 
     def configure(self, cnf=None, **kw):
@@ -393,6 +551,13 @@ class Switch(tk.Canvas):
         if options:
             super().configure(options)
     config = configure
+
+    def settle(self):
+        if self._motion is not None:
+            self._motion.cancel()
+            self._motion = None
+        self._pos = 1.0 if bool(self._var.get()) else 0.0
+        self._draw()
 
 
 class GroupedList(tk.Frame):
@@ -768,43 +933,156 @@ def tag(parent, text, tone="idle", bg=None):
     return chip
 
 
-class Segmented(tk.Frame):
-    """Two or three ways of doing the same thing, side by side in one well."""
+class _Strip(tk.Canvas):
+    """A row of words with one moving highlight behind them, drawn as a whole.
 
-    def __init__(self, parent, options, command=None, bg=None, font_key="tab"):
-        outer = bg or parent["bg"]
-        super().__init__(parent, bg=CARD_ALT)
-        round_corners(self, px(10), outer_bg=outer, border=BORDER_SOFT)
-        self.configure(highlightthickness=1, highlightbackground=BORDER_SOFT,
-                       highlightcolor=BORDER_SOFT)
+    One canvas rather than a widget per word, for one reason: a highlight that
+    slides has to be able to sit half under two words at once, and a tk widget
+    cannot be transparent. Drawn as text items it is trivial, and moving a
+    canvas item is the one thing tk does at 60 a second.
+    """
+
+    def __init__(self, parent, items, command=None, bg=None, font_key="tab",
+                 pad=(13, 7), radius=9, fill=HOVER, on_fg=TEXT, off_fg=TEXT_FAINT,
+                 gap=2):
+        self._bg = bg or parent["bg"]
+        super().__init__(parent, bg=self._bg, highlightthickness=0, bd=0)
         self._command = command
-        self._chips = {}
+        self._font = tkfont.Font(font=f(font_key))
+        self._fill, self._on_fg, self._off_fg = fill, on_fg, off_fg
+        self._radius = px(radius)
         self._active = None
-        holder = tk.Frame(self, bg=CARD_ALT)
-        holder.pack(padx=px(3), pady=px(3))
-        for key, label in options:
-            chip = _Chip(holder, label, lambda k=key: self.select(k), radius=8,
-                         outer=CARD_ALT, pad=(15, 6), font_key=font_key)
-            chip.pack(side=tk.LEFT)
-            self._chips[key] = chip
-        if options:
-            self.select(options[0][0], notify=False)
+        self._motion = None
+        self._slots = {}
+        self._labels = {}
+        self._order = [key for key, _ in items]
 
-    def select(self, key, notify=True):
-        if key not in self._chips or key == self._active:
-            return
-        self._active = key
-        for name, chip in self._chips.items():
-            if name == key:
-                chip.set_fill(CARD, TEXT)
+        padx, pady = px(pad[0]), px(pad[1])
+        height = self._font.metrics("linespace") + pady * 2
+        x = 0
+        for key, label in items:
+            width = self._font.measure(label) + padx * 2
+            self._slots[key] = (x, width)
+            self._labels[key] = self.create_text(
+                x + width / 2, height / 2, text=label, font=f(font_key),
+                fill=self._off_fg)
+            x += width + px(gap)
+        self.configure(width=max(1, x - px(gap)), height=height)
+        self._height = height
+
+        self._pill = self.create_polygon(
+            _round_points(0, 0, 1, 1, self._radius), smooth=True, splinesteps=18,
+            fill=self._bg, outline=self._bg)
+        self.tag_lower(self._pill)
+        self.bind("<Button-1>", self._click)
+        self.bind("<Motion>", self._hover)
+        self.bind("<Leave>", lambda _e: self._paint_text())
+        self.configure(cursor="hand2")
+
+    # ── geometry ────────────────────────────────────────────────────────────
+    def _at(self, x):
+        for key, (left, width) in self._slots.items():
+            if left <= x <= left + width:
+                return key
+        return None
+
+    def _place_pill(self, left, width):
+        self.coords(self._pill,
+                    *_round_points(left, 0, left + width, self._height, self._radius))
+
+    def _paint_text(self, pointer=None):
+        for key, item in self._labels.items():
+            if key == self._active:
+                colour = self._on_fg
+            elif key == pointer:
+                colour = TEXT
             else:
-                chip.set_fill(CARD_ALT, TEXT_FAINT)
+                colour = self._off_fg
+            self.itemconfigure(item, fill=colour)
+
+    # ── behaviour ───────────────────────────────────────────────────────────
+    def _click(self, event):
+        key = self._at(event.x)
+        if key is not None:
+            self.select(key)
+
+    def _hover(self, event):
+        self._paint_text(self._at(event.x))
+
+    def select(self, key, notify=True, animated=True):
+        if key not in self._slots or key == self._active:
+            return
+        previous = self._active
+        self._active = key
+        target = self._slots[key]
+        self.itemconfigure(self._pill, fill=self._fill, outline=self._fill)
+        if previous is None or not animated:
+            self._place_pill(*target)
+        else:
+            origin = self._slots[previous]
+
+            def step(fraction):
+                left = origin[0] + (target[0] - origin[0]) * fraction
+                width = origin[1] + (target[1] - origin[1]) * fraction
+                self._place_pill(left, width)
+
+            self._motion = animate(self, 180, step, ease=ease_in_out,
+                                   previous=self._motion)
+        self._paint_text()
         if notify and self._command:
             self._command(key)
+
+    def settle(self):
+        if self._motion is not None:
+            self._motion.cancel()
+            self._motion = None
+        if self._active is not None:
+            self._place_pill(*self._slots[self._active])
+
+    def set_label(self, key, text):
+        if key not in self._labels:
+            return
+        self.itemconfigure(self._labels[key], text=text)
+
+    def label_of(self, key):
+        return self.itemcget(self._labels[key], "text") if key in self._labels else ""
 
     @property
     def active(self):
         return self._active
+
+
+class Segmented(_Strip):
+    """Two or three ways of doing the same thing, side by side in one well."""
+
+    def __init__(self, parent, options, command=None, bg=None, font_key="tab"):
+        outer = bg or parent["bg"]
+        holder = tk.Frame(parent, bg=CARD_ALT, highlightthickness=1,
+                          highlightbackground=BORDER_SOFT, highlightcolor=BORDER_SOFT)
+        round_corners(holder, px(10), outer_bg=outer, border=BORDER_SOFT)
+        super().__init__(holder, options, command=command, bg=CARD_ALT,
+                         font_key=font_key, pad=(15, 6), radius=8, fill=CARD,
+                         on_fg=TEXT, off_fg=TEXT_FAINT, gap=0)
+        super_pack = tk.Canvas.pack
+        super_pack(self, padx=px(3), pady=px(3))
+        self._holder = holder
+        if options:
+            self.select(options[0][0], notify=False, animated=False)
+
+    # The caller packs the control; what it really packs is the well around it.
+    def pack(self, **kw):
+        self._holder.pack(**kw)
+        return self
+
+    def pack_forget(self):
+        self._holder.pack_forget()
+
+    def grid(self, **kw):
+        self._holder.grid(**kw)
+        return self
+
+    def winfo_manager(self):
+        return self._holder.winfo_manager()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -863,6 +1141,8 @@ class Step(tk.Frame):
 
         self.body = tk.Frame(content, bg=bg)
         self.body.pack(fill=tk.X, pady=(px(4), px(20)))
+        self._motion = None
+        self._colours = self._target_colours()
         self._paint()
 
     # ── the rail ────────────────────────────────────────────────────────────
@@ -879,9 +1159,29 @@ class Step(tk.Frame):
     def set_state(self, state):
         if state == self._state:
             return
+        origin = dict(self._colours)
         self._state = state
-        self._paint()
+        target = self._target_colours()
+
+        def step(fraction):
+            self._colours = {key: mix(origin[key], target[key], fraction)
+                             for key in target}
+            self._paint()
+
+        self._motion = animate(self, 130, step, previous=self._motion)
         self._title.configure(fg=_STEP_TITLE[state])
+
+    def settle(self):
+        if self._motion is not None:
+            self._motion.cancel()
+            self._motion = None
+        self._colours = self._target_colours()
+        self._paint()
+
+    def _target_colours(self):
+        spec = _RING[self._state]
+        return {"fill": spec["fill"], "fg": spec["fg"], "line": spec["line"],
+                "halo": spec["halo"] or self._bg}
 
     @property
     def state(self):
@@ -905,19 +1205,20 @@ class Step(tk.Frame):
 
     def _paint(self):
         spec = _RING[self._state]
+        colours = self._colours
         canvas = self._ring
         canvas.delete("all")
         full = px(self.RAIL)
         d = px(30)
         pad = (full - d) / 2
-        if spec["halo"]:
-            canvas.create_oval(1, 1, full - 1, full - 1, fill=spec["halo"],
-                               outline=spec["halo"])
-        canvas.create_oval(pad, pad, pad + d, pad + d, fill=spec["fill"],
-                           outline=spec["line"], width=max(1, px(1.5)))
+        if colours["halo"] != self._bg:
+            canvas.create_oval(1, 1, full - 1, full - 1, fill=colours["halo"],
+                               outline=colours["halo"])
+        canvas.create_oval(pad, pad, pad + d, pad + d, fill=colours["fill"],
+                           outline=colours["line"], width=max(1, px(1.5)))
         canvas.create_text(full / 2, full / 2 + px(0.5),
                            text=spec["glyph"] or str(self._number),
-                           fill=spec["fg"], font=f("ring"))
+                           fill=colours["fg"], font=f("ring"))
 
 
 class Flow(tk.Frame):
@@ -1042,6 +1343,74 @@ class StatusBar(tk.Frame):
         self.update_idletasks()
 
 
+# How far one notch of the wheel throws the page, and how quickly that dies
+# away. Together they decide the feel: a notch travels about 120 px and coasts
+# to a stop in something under half a second.
+WHEEL_PUSH = 12
+WHEEL_DECAY = 0.90
+WHEEL_FLOOR = 0.6
+
+
+def _has_room(widget) -> bool:
+    """Can this widget still scroll, or is everything already in view?"""
+    try:
+        first, last = widget.yview()
+    except (tk.TclError, ValueError, TypeError):
+        return False
+    return not (float(first) <= 0.0 and float(last) >= 1.0)
+
+
+def claim_wheel(widget, lines=3):
+    """Let a text or a table answer the wheel while it has somewhere to go.
+
+    While it does not, the wheel goes to the page, which is what you expect
+    when a log window shows five lines in a box that holds twelve.
+    """
+    widget._wheel_self = lambda w=widget: _has_room(w)
+    widget.wheel = lambda notches, w=widget: w.yview_scroll(
+        int(round(-notches * lines)) or (-1 if notches > 0 else 1), "units")
+    return widget
+
+
+def _scrollable_under(widget):
+    """The thing that should answer the wheel for the widget under the pointer.
+
+    A log window or a queue table scrolls itself while the pointer is over it;
+    anywhere else the page scrolls. Walking up from the widget under the
+    pointer is the only way to know which, and it replaces the old rule, which
+    was to bind the wheel while the pointer was over the canvas. That rule
+    quietly stopped working the moment the pointer touched any content, because
+    entering a child makes the parent report that the pointer left.
+    """
+    while widget is not None:
+        own = getattr(widget, "_wheel_self", None)
+        if own is not None and own():
+            return widget
+        if isinstance(widget, VScroll):
+            return widget
+        widget = getattr(widget, "master", None)
+    return None
+
+
+def install_wheel(root):
+    """One wheel binding for the whole window, routed by what is under it."""
+    def handle(event):
+        target = _scrollable_under(event.widget)
+        if target is None:
+            return None
+        if event.num == 4:
+            notches = 1
+        elif event.num == 5:
+            notches = -1
+        else:
+            notches = event.delta / 120.0 or (1 if event.delta > 0 else -1)
+        target.wheel(notches)
+        return "break"
+
+    for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+        root.bind_all(sequence, handle, add="+")
+
+
 class VScroll(tk.Frame):
     """Vertically scrollable region whose inner frame tracks the canvas width."""
 
@@ -1064,12 +1433,11 @@ class VScroll(tk.Frame):
         self._bar_shown = False
         self._region = None
         self._width = None
+        self._velocity = 0.0
+        self._glide_after = None
 
         self.inner.bind("<Configure>", self._sync_region)
         self.canvas.bind("<Configure>", self._fit_width)
-        # Wheel only while the pointer is over this region
-        self.canvas.bind("<Enter>", self._bind_wheel)
-        self.canvas.bind("<Leave>", self._unbind_wheel)
 
     def _fit_width(self, event):
         if event.width == self._width:
@@ -1095,23 +1463,52 @@ class VScroll(tk.Frame):
             self._bar_shown = True
         self.scrollbar.set(first, last)
 
-    def _wheel(self, event):
-        if event.num == 4:
-            delta = 1
-        elif event.num == 5:
-            delta = -1
-        else:
-            delta = int(event.delta / 120) or (1 if event.delta > 0 else -1)
-        self.canvas.yview_scroll(-delta, "units")
+    # ── the wheel ───────────────────────────────────────────────────────────
+    def wheel(self, notches):
+        """A notch does not jump the page, it gives it a push that runs out."""
+        self._velocity += notches * px(WHEEL_PUSH)
+        if self._glide_after is None:
+            self._glide()
 
-    def _bind_wheel(self, _=None):
-        self.canvas.bind_all("<MouseWheel>", self._wheel)
-        self.canvas.bind_all("<Button-4>", self._wheel)
-        self.canvas.bind_all("<Button-5>", self._wheel)
+    def _glide(self):
+        self._glide_after = None
+        if abs(self._velocity) < WHEEL_FLOOR:
+            self._velocity = 0.0
+            return
+        moved = self.scroll_by(self._velocity)
+        self._velocity *= WHEEL_DECAY
+        if not moved:                       # against the end, stop dead
+            self._velocity = 0.0
+            return
+        try:
+            self._glide_after = self.after(FRAME_MS, self._glide)
+        except tk.TclError:
+            self._glide_after = None
 
-    def _unbind_wheel(self, _=None):
-        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            self.canvas.unbind_all(seq)
+    def scroll_by(self, pixels) -> bool:
+        """Move by pixels, not by lines. False when it was already at the end."""
+        region = self.canvas.bbox("all")
+        if not region:
+            return False
+        height = region[3] - region[1]
+        view = self.canvas.winfo_height()
+        if height <= view or view <= 1:
+            return False
+        before = self.canvas.canvasy(0)
+        top = max(0, min(before - pixels, height - view))
+        if abs(top - before) < 0.5:
+            return False                       # already against that end
+        self.canvas.yview_moveto(top / height)
+        return True
+
+    def settle(self):
+        self._velocity = 0.0
+        if self._glide_after is not None:
+            try:
+                self.after_cancel(self._glide_after)
+            except tk.TclError:
+                pass
+            self._glide_after = None
 
 
 class LogView(tk.Frame):
@@ -1139,6 +1536,7 @@ class LogView(tk.Frame):
         self.text.configure(yscrollcommand=lambda *a: self._sync(self.vbar, "ns", 0, 1, *a),
                             xscrollcommand=lambda *a: self._sync(self.hbar, "ew", 1, 0, *a))
         self.text.grid(row=0, column=0, sticky="nsew")
+        claim_wheel(self.text)
         for tag, colour in self.TAGS.items():
             self.text.tag_configure(tag, foreground=colour)
 
@@ -1161,6 +1559,32 @@ class LogView(tk.Frame):
         if follow:
             self.text.see(tk.END)
         self.text.configure(state="disabled")
+
+    def write_all(self, lines, follow=False):
+        """Whole report in one go: a list of (line, tag).
+
+        One Tcl call instead of one per line. Sixty separate inserts is what
+        made the window pause for a tenth of a second every time the pre-flight
+        was redrawn, and it was redrawn on every keystroke.
+        """
+        pieces = []
+        for line, tag in lines:
+            pieces.append(line + "\n")
+            pieces.append((tag,) if tag else ())
+        self.text.configure(state="normal")
+        if pieces:
+            self.text.insert(tk.END, *pieces)
+        if follow:
+            self.text.see(tk.END)
+        self.text.configure(state="disabled")
+
+    def set_all(self, lines):
+        """Replace everything with one report, in one call."""
+        self.text.configure(state="normal")
+        self.text.delete("1.0", tk.END)
+        self.text.configure(state="disabled")
+        self.write_all(lines)
+        self.scroll_top()
 
     def set_text(self, content, tag=None):
         self.clear()
@@ -1195,6 +1619,7 @@ class Table(tk.Frame):
         self.scroll = ttk.Scrollbar(holder, orient="vertical",
                                     style="DME.Vertical.TScrollbar", command=self.tree.yview)
         self.tree.configure(yscrollcommand=self._sync)
+        claim_wheel(self.tree)
         self.tree.grid(row=0, column=0, sticky="nsew")
         self.tree.tag_configure("ok", foreground=OK)
         self.tree.tag_configure("error", foreground=ERR)
@@ -1263,16 +1688,14 @@ class Page(tk.Frame):
         if width:
             cap, floor, last = px(width), px(420), [None]
 
-            def fit(event):
-                if event.width <= 1:
-                    return
-                size = max(floor, min(cap, event.width))
+            def fit(width, _height):
+                size = max(floor, min(cap, width))
                 if size == last[0]:
                     return
                 last[0] = size
                 row.columnconfigure(0, minsize=size)
 
-            row.bind("<Configure>", fit, add="+")
+            on_resize(row, fit)
 
     def card(self, title, hint=None, pady=(0, 14)):
         card = Card(self.body, title=title, hint=hint)
@@ -1373,7 +1796,6 @@ class TopNav(tk.Frame):
         super().__init__(parent, bg=bg, height=px(60))
         self._bg = bg
         self._command = command
-        self._items = {}
 
         row = tk.Frame(self, bg=bg)
         row.pack(fill=tk.BOTH, expand=True, padx=px(26))
@@ -1389,12 +1811,10 @@ class TopNav(tk.Frame):
         tk.Frame(row, bg=HAIRLINE, width=1).pack(side=tk.LEFT, fill=tk.Y,
                                                  padx=px(18), pady=px(20))
 
-        for key, label in items:
-            chip = _Chip(row, label, lambda k=key: self._command(k), radius=9,
-                         outer=bg, pad=(13, 7))
-            chip.set_fill(bg, TEXT_FAINT)
-            chip.pack(side=tk.LEFT, padx=(0, px(2)))
-            self._items[key] = chip
+        # One canvas for the whole row, so the highlight can slide from one
+        # word to the next instead of blinking out here and in over there.
+        self.strip = _Strip(row, items, command=self._command, bg=bg)
+        self.strip.pack(side=tk.LEFT)
 
         state = tk.Frame(row, bg=bg)
         state.pack(side=tk.RIGHT)
@@ -1407,15 +1827,16 @@ class TopNav(tk.Frame):
         self.set_state("", "idle")
 
     def set_active(self, key):
-        for name, chip in self._items.items():
-            if name == key:
-                chip.set_fill(HOVER, TEXT)
-            else:
-                chip.set_fill(self._bg, TEXT_FAINT)
+        self.strip.select(key, notify=False)
+
+    def settle(self):
+        self.strip.settle()
 
     def set_label(self, key, text):
-        if key in self._items:
-            self._items[key].set_text(text)
+        self.strip.set_label(key, text)
+
+    def label_of(self, key):
+        return self.strip.label_of(key)
 
     def set_state(self, text, tone="idle"):
         self._state_var.set(text)
@@ -1440,6 +1861,7 @@ class Shell(tk.Frame):
         self._pages = dict((entry["key"], dict(entry)) for entry in nav)
         self._active = None
         self._mounted = {}
+        self._motion = None
 
         self.nav = TopNav(self, brand,
                           [(entry["key"], entry["label"]) for entry in nav],
@@ -1471,18 +1893,19 @@ class Shell(tk.Frame):
         # move the whole page up or down on every click; this is why.
         self._subtitle_font = tkfont.Font(font=f("body"))
         self._subtitle_lines = None
-        bar.bind("<Configure>", self._reserve_header, add="+")
+        on_resize(bar, lambda width, _h: self._reserve_header(width))
 
         self.status = StatusBar(main, f"{brand.VENDOR}  \u00b7  v{version}")
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
 
         self.host = tk.Frame(main, bg=BG)
         self.host.pack(fill=tk.BOTH, expand=True)
+        self._reserve_header()
 
-    def _reserve_header(self, event=None):
+    def _reserve_header(self, bar_width=None):
         width = self._subtitle.cget("wraplength")
-        if event is not None and event.width > 1:
-            width = max(px(320), event.width - px(8))
+        if bar_width:
+            width = max(px(320), bar_width - px(8))
         # Not just the subtitle a page shows now: every subtitle it can ever
         # show. A setting that rewords the header must not move the page under
         # it either. A nav entry lists its alternatives under "subtitles".
@@ -1507,12 +1930,40 @@ class Shell(tk.Frame):
         self._mounted = dict(pages)
         for page in self._mounted.values():
             page.place(x=0, y=0, relwidth=1.0, relheight=1.0)
-        self.show(self._active)
+        self.show(self._active, animated=False)
 
-    def show(self, key):
+    # How far the incoming page starts below its place. Small on purpose: it
+    # reads as arrival, not as a slideshow, and it is over in 140 ms.
+    SLIDE = 0.02
+
+    def show(self, key, animated=True):
         page = self._mounted.get(key)
-        if page is not None:
-            page.lift()
+        if page is None:
+            return
+        page.lift()
+        if self._motion is not None:
+            self._motion.cancel()
+            self._motion = None
+        if not animated:
+            page.place_configure(rely=0.0)
+            return
+        # Every page is placed at full size, so this moves a frame. It does not
+        # lay the page out again, which is what makes it cheap enough to run.
+        def step(fraction):
+            page.place_configure(rely=self.SLIDE * (1.0 - fraction))
+
+        self._motion = animate(page, 140, step,
+                               done=lambda: page.place_configure(rely=0.0))
+
+    def settle(self):
+        """Put every page exactly where it belongs, now. For the tests, and
+        for a rebuild that must not catch a page mid flight."""
+        if self._motion is not None:
+            self._motion.cancel()
+            self._motion = None
+        for page in self._mounted.values():
+            page.place_configure(rely=0.0)
+        self.nav.settle()
 
     @property
     def active(self):

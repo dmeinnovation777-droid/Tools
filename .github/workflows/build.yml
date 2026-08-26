@@ -43,6 +43,8 @@ jobs:
         run: xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_layout.py
       - name: The language switch loses nothing
         run: xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_language.py
+      - name: The window stays alive while it works
+        run: xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_responsive.py
 
   build-windows:
     name: Build Windows installer

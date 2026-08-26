@@ -45,6 +45,8 @@ def probe(app, label):
     for key in AREAS:
         app.shell.select(key)
         app.update()
+        app.shell.settle()               # 3.1.0 slides the page in; let it land
+        app.update()
         page = app.pages[key]
         seen[key] = {
             "host": app.shell.host.winfo_rooty(),
@@ -74,6 +76,8 @@ def probe(app, label):
     # Go round again. Nothing may have moved in the meantime.
     for key in list(AREAS) + list(reversed(AREAS)):
         app.shell.select(key)
+        app.update()
+        app.shell.settle()
         app.update()
         page = app.pages[key]
         for name, value in (("page", page.winfo_rooty()),
