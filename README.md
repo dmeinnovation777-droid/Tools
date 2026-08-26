@@ -46,7 +46,7 @@ Größen bereit.
 unter *Assets*:
 
 ```
-DME-Innovation-Tools-Setup-2.0.0.exe
+DME-Innovation-Tools-Setup-2.1.0.exe
 ```
 
 Windows zeigt bei unsignierten Setups „Der Computer wurde durch Windows
@@ -359,7 +359,7 @@ build_exe.bat           :: nur die drei .exe, ohne Setup
 (`winget install JRSoftware.InnoSetup`). Ergebnis:
 
 ```
-dist\DME-Innovation-Tools-Setup-2.0.0.exe
+dist\DME-Innovation-Tools-Setup-2.1.0.exe
 dist\DME Innovation Tools.exe
 dist\AutoTuner Backup Tool.exe
 dist\MHD Lock Tool.exe

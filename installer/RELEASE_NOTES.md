@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-2.0.0.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-2.1.0.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -18,6 +18,37 @@ Dazu Startmenü-Einträge, auf Wunsch eine Desktop-Verknüpfung und ein Uninstal
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Neu in 2.1.0
+
+**Das MHD Lock Tool kann jetzt auch nur den Ordner bauen.** Wer selbst in
+`.mhd` umwandelt, drückt statt *Lock now* den Knopf **Prepare folder**
+daneben — dauerhaft sichtbar, nichts aufzuklappen. Er legt das fertige
+Arbeitsverzeichnis an, mit allem was hineingehört, und startet nichts. Der
+Ordner bleibt liegen; den Rest machst Du von Hand.
+
+Wenn das bei Dir die Regel ist, setz in den Einstellungen **„I convert to .mhd
+myself — only prepare the folder"**. Dann wird der Ordner die Hauptaktion,
+*Lock now* verschwindet, der Stapel heißt *Prepare folders* und baut einen
+Ordner je Auftrag — und die App fragt nicht mehr nach dem Pfad zum Builder.
+Eingetragen bleibt er trotzdem nützlich: er entscheidet, ob die `.exe` mit in
+den Ordner kopiert wird. Der `.toolkey` wird weiter gebraucht, der gehört
+hinein.
+
+Gegengeprüft an einem echten Auftrag: der erzeugte Ordner ist mit einem von
+Hand gebauten **byteidentisch**, alle sechs Dateien, keine Extras.
+
+Dazu drei Kleinigkeiten, die beim Durchsehen jedes Bildschirms auffielen:
+
+* Erklärungen unter den Kästchen in den Einstellungen wurden am Kartenrand
+  abgeschnitten — sie brechen jetzt um.
+* Im grünen Meldungsstreifen wurde „Show in folder" zu „in" gequetscht, sobald
+  die Meldung ein langer Pfad ohne Leerzeichen war.
+* Das Ordner-Symbol auf dem Knopf war ein dünner Umriss, der neben dem
+  Vorhängeschloss verschwand — ersatzlos entfernt.
+
+**An der Funktion des Lockens ändert sich nichts.** Kein Eingriff in das
+Erkennen der Kundendatei, die XDF-Suche oder die Übernahme der VIN.
 
 ## Neu in 2.0.0
 
