@@ -18,7 +18,7 @@ Bedienung und Aufbau stehen im [README](README.md).
 | Windows-Setup (Inno Setup) + CI-Build | fertig |
 | README, Build-Skripte | fertig |
 
-`python -m unittest discover -s tests` → 134 Tests, grün.
+`python -m unittest discover -s tests` → 147 Tests, grün.
 
 Produktname und Version stehen zentral in `dme_brand.py`
 (`SUITE = "DME Innovation Tools"`, `VERSION = "2.0.0"`); beide Werkzeuge, das
@@ -208,6 +208,25 @@ inhaltliche Abgleich weiter, aber gedeckelt durch `CONTENT_SCAN_BUDGET = 250`
 (~2,7 s) mit einer Notiz statt einer hängenden Oberfläche. Gibt es mehrere XDFs
 zu derselben ROM-Nummer, gewinnt die neueste (`_newest`) und die Notiz nennt
 die gewählte Datei.
+
+### 3.7 Ordner-Modus
+
+Nicht jeder will, dass die App den Builder startet. `prepare_folder()` legt
+deshalb dasselbe Arbeitsverzeichnis an wie ein Lock-Lauf, nur an einer
+dauerhaften Stelle (Ausgabeordner, sonst neben der getunten Datei) und ohne
+etwas auszuführen. Gegen den handgebauten Ordner aus „Mathias S58 Multimap"
+gegengeprüft: alle sechs Dateien **byteidentisch** (SHA-256), keine Extras.
+
+`prepare_only` in der Konfiguration macht daraus den Regelbetrieb — der
+Ordner-Knopf wird zur Hauptaktion, *Lock now* wird nicht ausgegraut sondern
+abgehängt (ein toter Knopf lädt zur Suche nach dem ein, was ihn belebt, und
+hier gäbe es nichts), und `missing_setup()` verlangt den Builder-Pfad nicht
+mehr. Der `.toolkey` bleibt in beiden Modi Pflicht, weil er in den Ordner
+gehört.
+
+Die Prüfung „was fehlt noch?" liegt bewusst in `missing_setup()` statt in der
+GUI-Methode: so lässt sie sich ohne Anzeige testen — dieselbe Trennung wie bei
+`prepare_folder()`.
 
 ---
 

@@ -250,9 +250,24 @@ Builder darin, zeigt dessen Ausgabe live und farbig, holt die erzeugte `.mhd`
 ab, benennt sie nach Vorlage und legt ein `.log` mit Prüfergebnis und
 Builder-Ausgabe daneben.
 
-Unter **Details and builder log** liegen das vollständige Protokoll und
-**Prepare folder only** — das baut nur das Arbeitsverzeichnis, falls du den
-Builder lieber selbst startest.
+Unter **Details and builder log** liegt das vollständige Protokoll.
+
+### Nur den Ordner bauen
+
+Wer selbst in `.mhd` umwandeln will, drückt statt *Lock now* den Knopf
+**Prepare folder** daneben. Er legt das fertige Arbeitsverzeichnis an — mit
+allem, was hineingehört, einschließlich der Builder-Exe — und startet nichts.
+Der Ordner bleibt liegen (im Ausgabeordner, sonst neben der getunten Datei);
+danach öffnest du ihn und machst den Rest von Hand.
+
+Wenn das die Regel ist und nicht die Ausnahme, setz in den Einstellungen
+**„I convert to .mhd myself — only prepare the folder"**. Dann wird der
+Ordner-Knopf zur Hauptaktion, *Lock now* verschwindet, der Stapel heißt
+*Prepare folders* und baut einen Ordner je Auftrag — und die App verlangt den
+Pfad zum Builder nicht mehr. Eingetragen bleibt er trotzdem nützlich: er
+entscheidet, ob die `.exe` mit in den Ordner kopiert wird.
+
+Der `.toolkey` wird in beiden Fällen gebraucht — er gehört in den Ordner.
 
 ### Arbeitsverzeichnis
 
@@ -269,7 +284,9 @@ Gen.toolkey                         dein MHD-Schlüssel
 TuningMapBuilder-v6.exe             Kopie des Builders, wird dort ausgeführt
 ```
 
-Danach wird der Ordner wieder entfernt (abschaltbar unter **Advanced**).
+Beim Locken wird der Ordner danach wieder entfernt (abschaltbar unter
+**Advanced**). Mit **Prepare folder** bleibt er stehen — dort ist er ja der
+Zweck der Übung.
 
 ### Batch
 
@@ -424,7 +441,7 @@ Dazu zwei Regeln, an die sich beide Programme halten:
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v        # 134 Tests, keine Anzeige nötig
+python -m unittest discover -s tests -v        # 147 Tests, keine Anzeige nötig
 
 # GUI-Tests (brauchen tkinter und eine Anzeige)
 xvfb-run -a -s "-screen 0  880x560x24" python tests/smoke_gui_suite.py

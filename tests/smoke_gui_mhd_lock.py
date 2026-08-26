@@ -164,8 +164,11 @@ assert "DMETEST0000000001" in job_log and "Map correctly written" in job_log
 print("lock run OK    ->", produced)
 assert not [p for p in os.listdir(tempfile.gettempdir()) if p.startswith("dme_mhd_")]
 
-# ── "Prepare folder only" must rebuild a hand-built folder ──────────────────
-app._on_stage_only()
+# ── "Prepare folder" must rebuild a hand-built folder ───────────────────────
+# It has to be reachable without opening anything: the action row, not the log.
+assert app.btn_stage.winfo_ismapped(), "the prepare button is not visible"
+assert app.btn_stage.master is app.lock_page.action_row
+app.btn_stage._invoke()
 app.update()
 work_dirs = [p for p in os.listdir(os.path.join(WORK, "locked")) if p.endswith("_work")]
 assert work_dirs, os.listdir(os.path.join(WORK, "locked"))
@@ -197,11 +200,36 @@ assert app.batch_table.tree.item("0", "values")[3] == "locked", \
 print("batch OK       :", app.var_batch_summary.get())
 shoot("mhd_batch")
 
-# ── error path ──────────────────────────────────────────────────────────────
-app.var_exe.set("")
+# ── folder mode: no builder needed, and the queue only prepares ─────────────
+app.var_prepare_only.set(True)
+app.var_exe.set("")                      # the whole point: no builder configured
 app._save_settings()
+app.update()
+assert not m.missing_setup(app.config_data, app.var_toolkey.get()), \
+    m.missing_setup(app.config_data, app.var_toolkey.get())
 app.tabs.select("lock")
 app.update()
+assert not app.setup_card.winfo_ismapped(), "folder mode still demands a builder"
+app.tabs.select("batch")
+app.update()
+assert app.btn_batch_run.cget("text").startswith("Prepare folders")
+app._on_batch_run()
+assert wait_for_worker(app, timeout=90), "batch prepare did not finish"
+assert app.batch_table.tree.item("0", "values")[3] == "prepared", \
+    app.batch_table.tree.item("0", "values")
+prepared = [p for p in os.listdir(os.path.join(WORK, "locked")) if p.endswith("_work")]
+assert len(prepared) >= 2, prepared          # the lock-page one plus this batch one
+print("folder mode OK :", app.var_batch_summary.get())
+
+app.tabs.select("lock")
+app.update()
+assert not app.btn_lock.winfo_ismapped(), "the lock pill survives in folder mode"
+app.var_prepare_only.set(False)
+app._save_settings()
+app.update()
+assert app.btn_lock.winfo_ismapped(), "the lock pill does not come back"
+
+# ── error path ──────────────────────────────────────────────────────────────
 app._on_lock()
 app.update()
 assert "No MHD map builder" in app.lock_page.banner._text.cget("text")

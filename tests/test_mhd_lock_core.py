@@ -382,6 +382,111 @@ class TestStaging(unittest.TestCase):
         self.assertIn("TuningMapBuilder-v6.exe", os.listdir(workdir))
 
 
+class TestPrepareFolder(unittest.TestCase):
+    """Folder mode: build the folder, keep it, start nothing."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        d = self.tmp.name
+        self.exe = write(os.path.join(d, "TuningMapBuilder-v6.exe"), b"MZ")
+        self.job = m.LockJob(
+            customer="Demo Kunde", vin="DMETEST0000000001",
+            stock_bin=write(os.path.join(d, "00005C6414C808_original.bin"), bytes(64)),
+            tuned_bin=write(os.path.join(d, "MAP1 E45 MAP2 E30 v4.bin"), bytes(64)),
+            xdf=write(os.path.join(d, "00005C6414C808.xdf"), SAMPLE_XDF),
+            toolkey=write(os.path.join(d, "Gen.toolkey"), b"\x00" * 128))
+        self.config = dict(m.DEFAULT_CONFIG, builder_exe=self.exe)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_folder_holds_everything_a_hand_built_one_holds(self):
+        manifest = m.prepare_folder(self.job, self.config)
+        self.assertEqual(sorted(os.listdir(manifest["workdir"])), [
+            "00005C6414C808.xdf",
+            "00005C6414C808_original.bin",
+            "DMETEST0000000001_vin.txt",
+            "Gen.toolkey",
+            "MAP1 E45 MAP2 E30 v4.bin",
+            "TuningMapBuilder-v6.exe",
+        ])
+
+    def test_it_lands_next_to_the_tuned_file_when_no_output_is_set(self):
+        manifest = m.prepare_folder(self.job, self.config)
+        self.assertEqual(os.path.dirname(manifest["workdir"]), self.tmp.name)
+        self.assertEqual(os.path.basename(manifest["workdir"]), "Demo_Kunde_work")
+
+    def test_it_honours_the_output_folder(self):
+        out = os.path.join(self.tmp.name, "locked")
+        os.makedirs(out)
+        self.job.output_dir = out
+        manifest = m.prepare_folder(self.job, self.config)
+        self.assertEqual(os.path.dirname(manifest["workdir"]), out)
+
+    def test_a_second_run_never_overwrites_the_first(self):
+        first = m.prepare_folder(self.job, self.config)["workdir"]
+        second = m.prepare_folder(self.job, self.config)["workdir"]
+        self.assertNotEqual(first, second)
+        self.assertTrue(os.path.isdir(first) and os.path.isdir(second))
+
+    def test_without_a_configured_builder_the_folder_still_gets_built(self):
+        manifest = m.prepare_folder(self.job, dict(m.DEFAULT_CONFIG))
+        self.assertEqual(manifest["builder"], "")
+        self.assertEqual(len(os.listdir(manifest["workdir"])), 5)
+
+    def test_the_copy_switch_keeps_the_builder_out(self):
+        config = dict(self.config, builder_in_workdir=False)
+        manifest = m.prepare_folder(self.job, config)
+        self.assertEqual(manifest["builder"], "")
+        self.assertNotIn("TuningMapBuilder-v6.exe", os.listdir(manifest["workdir"]))
+
+    def test_nothing_is_executed(self):
+        """The whole point of the mode - prepare_folder must not launch a thing."""
+        calls = []
+        original = m.run_builder
+        m.run_builder = lambda *a, **k: calls.append(a)
+        try:
+            m.prepare_folder(self.job, self.config)
+        finally:
+            m.run_builder = original
+        self.assertEqual(calls, [])
+
+
+class TestMissingSetup(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.exe = write(os.path.join(self.tmp.name, "builder.exe"), b"MZ")
+        self.key = write(os.path.join(self.tmp.name, "Gen.toolkey"), b"\x00")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_fresh_install_needs_both(self):
+        self.assertEqual(len(m.missing_setup(dict(m.DEFAULT_CONFIG))), 2)
+
+    def test_folder_mode_does_not_ask_for_a_builder(self):
+        config = dict(m.DEFAULT_CONFIG, prepare_only=True, toolkey=self.key)
+        self.assertEqual(m.missing_setup(config), [])
+
+    def test_folder_mode_still_needs_the_toolkey(self):
+        """It is copied into the folder, so it is not optional in either mode."""
+        config = dict(m.DEFAULT_CONFIG, prepare_only=True)
+        self.assertEqual(len(m.missing_setup(config)), 1)
+        self.assertIn("toolkey", m.missing_setup(config)[0])
+
+    def test_a_per_job_toolkey_counts(self):
+        config = dict(m.DEFAULT_CONFIG, prepare_only=True)
+        self.assertEqual(m.missing_setup(config, toolkey_override=self.key), [])
+
+    def test_a_path_that_no_longer_exists_counts_as_missing(self):
+        config = dict(m.DEFAULT_CONFIG, builder_exe="/gone/builder.exe", toolkey=self.key)
+        self.assertEqual(len(m.missing_setup(config)), 1)
+
+    def test_nothing_missing_once_both_are_set(self):
+        config = dict(m.DEFAULT_CONFIG, builder_exe=self.exe, toolkey=self.key)
+        self.assertEqual(m.missing_setup(config), [])
+
+
 class TestBuilderOutput(unittest.TestCase):
     def test_classifies_real_messages(self):
         self.assertEqual(m.classify_line("Map correctly written : out.mhd"), "ok")

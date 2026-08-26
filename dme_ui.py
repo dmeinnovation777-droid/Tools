@@ -382,6 +382,18 @@ class RoundedButton(tk.Canvas):
         self._label = self.create_text(w / 2, h / 2, text=self._text, fill=colour,
                                        font=self._font)
 
+    def set_variant(self, variant):
+        """Re-rank a button in place - the same action, a different weight.
+
+        A page whose primary action changes with a setting would otherwise have
+        to build two buttons and pack one away."""
+        spec = _VARIANTS[variant]
+        self._fill = spec["bg"] if variant != "ghost" else self._outer
+        self._hover, self._press = spec["hover"], spec["press"]
+        self._fg = spec["fg"]
+        self._border = spec.get("border")
+        self._draw()
+
     def _paint(self, colour):
         if self._state == "disabled" or self._shape is None:
             return
@@ -593,7 +605,6 @@ class Banner(tk.Frame):
         self._icon.pack(side=tk.LEFT, padx=(px(12), px(8)), pady=px(10))
         self._text = tk.Label(inner, text="", bg=OK_BG, fg=TEXT, font=f("small"),
                               anchor="w", justify="left", wraplength=px(560))
-        self._text.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=px(10))
         self._action = tk.Label(inner, text="", bg=OK_BG, fg=OK, font=f("small"),
                                 cursor="hand2", padx=px(8))
         self._action_command = None
@@ -602,7 +613,7 @@ class Banner(tk.Frame):
         self._close = icon_button(inner, "✕", self.hide, bg=OK_BG, fg=TEXT_FAINT,
                                   hover_fg=TEXT, hover_bg=OK_BG)
         # Icon, action link and close button share the row; whatever they take
-        # is not available for the message.
+        # is not available for the message. show() decides the pack order.
         wrap_to_parent(self._text, minimum=px(200),
                        inset=lambda: (self._icon.winfo_width()
                                       + self._action.winfo_width()
@@ -622,14 +633,20 @@ class Banner(tk.Frame):
         self._text.configure(bg=bg, text=text)
         self._close.configure(bg=bg, activebackground=bg)
         on_hover(self._close, bg, bg, fg_normal=TEXT_FAINT, fg_active=TEXT)
+        # Pack order decides who gets squeezed: the packer serves each widget in
+        # turn and the last one lives on the remainder. The message is therefore
+        # packed last, so an unbreakable file path cannot crowd out the link -
+        # "Show in folder" used to arrive as "in".
         self._close.pack_forget()
         self._action.pack_forget()
+        self._text.pack_forget()
+        self._close.pack(side=tk.RIGHT, padx=(0, 8))
         if action_text and action:
             self._action_command = action
             self._action.configure(text=action_text, bg=bg, fg=fg,
                                    font=(f("small")[0], f("small")[1], "underline"))
             self._action.pack(side=tk.RIGHT, padx=(px(6), px(4)))
-        self._close.pack(side=tk.RIGHT, padx=(0, 8))
+        self._text.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=px(10))
         if not self._visible:
             self._wrap.pack(fill=tk.X)
             self._visible = True
@@ -1025,7 +1042,9 @@ class Shell(tk.Frame):
         super().__init__(root, bg=BG)
         self._on_select = on_select
         self._nav = {}
-        self._pages = dict((entry["key"], entry) for entry in nav)
+        # Copied, not referenced: set_subtitle writes here, and the caller's nav
+        # list is usually a class attribute that must not pick up per-instance edits.
+        self._pages = dict((entry["key"], dict(entry)) for entry in nav)
         self._active = None
 
         side = tk.Frame(self, bg=SURFACE, width=px(238))
@@ -1083,3 +1102,9 @@ class Shell(tk.Frame):
         self._title.configure(text=entry.get("title", entry["label"]))
         self._subtitle.configure(text=entry.get("subtitle", ""))
         self._on_select(key)
+
+    def set_subtitle(self, key, text):
+        """Reword a page header when a setting changes what the page does."""
+        self._pages[key]["subtitle"] = text
+        if self._active == key:
+            self._subtitle.configure(text=text)

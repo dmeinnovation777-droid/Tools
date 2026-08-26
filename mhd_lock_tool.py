@@ -46,6 +46,18 @@ APP_NAME = "MHD Lock Tool"
 APP_VERSION = brand.VERSION
 APP_TAGLINE = "Automated MHD+ tune locking for the MHD Map Encryption tool"
 
+# Both pages say something different once the builder is left out of it.
+LOCK_SUBTITLE = ("Pick the customer's tuned file — stock ROM, XDF and tool key are "
+                 "found automatically, the VIN comes from the customer's mapswitch "
+                 "read. Check the VIN, press Lock. That is all.")
+PREPARE_SUBTITLE = ("Pick the customer's tuned file — stock ROM, XDF and tool key are "
+                    "found automatically, the VIN comes from the customer's mapswitch "
+                    "read. You get the finished working folder; the .mhd is yours to make.")
+BATCH_SUBTITLE = ("Lock a whole queue in one go. Stock ROM and XDF are resolved per "
+                  "file, and every job runs in its own clean folder.")
+BATCH_PREPARE_SUBTITLE = ("Build a working folder for every file in the queue. Stock ROM "
+                          "and XDF are resolved per file, and nothing is started.")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # What the MHD map builder expects in its working directory
@@ -929,6 +941,25 @@ def stage_job(job: LockJob, workdir: str, builder_exe: str = "") -> dict:
             "extras": staged_extras, "builder": staged_builder}
 
 
+def staged_builder_exe(config: dict) -> str:
+    """The builder to copy into a working folder, or "" when none should go in."""
+    if not config.get("builder_in_workdir", True):
+        return ""
+    return config.get("builder_exe", "")
+
+
+def prepare_folder(job: LockJob, config: dict) -> dict:
+    """Build the working folder and leave it there. Nothing is started.
+
+    For the tuner who converts to .mhd by hand: the folder ends up next to the
+    tuned file (or in the configured output folder) instead of in a temporary
+    directory that the lock run deletes again.
+    """
+    target = job.output_dir or os.path.dirname(job.tuned_bin)
+    workdir = unique_path(os.path.join(target, f"{safe_name(job.label, 'job')}_work"))
+    return stage_job(job, workdir, staged_builder_exe(config))
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Running the builder
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1126,6 +1157,7 @@ DEFAULT_CONFIG = {
     "builder_args": "",
     "pass_workdir_arg": False,
     "builder_in_workdir": True,
+    "prepare_only": False,
     "output_dir": "",
     "name_template": "{source}",
     "keep_staging": False,
@@ -1135,6 +1167,25 @@ DEFAULT_CONFIG = {
     "library_dir": "",
     "last_customer": "",
 }
+
+
+def missing_setup(config: dict, toolkey_override: str = "") -> list[str]:
+    """What still has to be set once before jobs stop needing anything.
+
+    In folder mode the builder is never started, so its path is no longer a
+    condition - it only decides whether the .exe is copied into the folder.
+    The .toolkey stays required either way: it belongs in the folder.
+    """
+    problems = []
+    if not config.get("prepare_only", False):
+        exe = config.get("builder_exe", "")
+        if not exe or not os.path.isfile(exe):
+            problems.append("the path to your MHD map builder (TuningMapBuilder / "
+                            "MHD Map Encryption)")
+    key = config.get("toolkey", "")
+    if (not key or not os.path.isfile(key)) and not toolkey_override.strip():
+        problems.append("your .toolkey")
+    return problems
 
 
 def config_path() -> str:
@@ -1277,12 +1328,9 @@ class MhdLockTool(_TkBase):
 
     NAV = [
         {"key": "lock", "label": "Lock", "title": "Lock a tune",
-         "subtitle": "Pick the customer's tuned file — stock ROM, XDF and tool key are "
-                     "found automatically, the VIN comes from the customer's mapswitch "
-                     "read. Check the VIN, press Lock. That is all."},
+         "subtitle": LOCK_SUBTITLE},
         {"key": "batch", "label": "Batch", "title": "Batch",
-         "subtitle": "Lock a whole queue in one go. Stock ROM and XDF are resolved per "
-                     "file, and every job runs in its own clean folder."},
+         "subtitle": BATCH_SUBTITLE},
         {"key": "settings", "label": "Settings", "title": "Settings",
          "subtitle": "Point the tool at your own licensed MHD map builder and your key. "
                      "Set once, used for every job."},
@@ -1379,9 +1427,6 @@ class MhdLockTool(_TkBase):
         self.log.pack(fill=tk.BOTH, expand=True)
         tools = tk.Frame(detail_card.body, bg=ui.CARD)
         tools.pack(fill=tk.X, pady=(10, 0))
-        self.btn_stage = ui.button(tools, "Prepare folder only", self._on_stage_only,
-                                   variant="secondary", size="sm")
-        self.btn_stage.pack(side=tk.LEFT)
         ui.button(tools, "Clear", self.log.clear, variant="ghost", size="sm",
                   bg=ui.CARD).pack(side=tk.RIGHT)
         ui.button(tools, "Re-check  ⟳", lambda: self._resolve_and_check(force=True),
@@ -1390,9 +1435,16 @@ class MhdLockTool(_TkBase):
 
         self.var_summary = tk.StringVar(value="Waiting for a tuned file")
         page.summary(self.var_summary)
+        # Two ways out of this page, both always visible. Which one is the
+        # primary pill depends on the folder mode - see _apply_prepare_mode.
         self.btn_lock = ui.button(page.action_row, "Lock now  🔒", self._on_lock,
                                   variant="primary", size="lg")
         self.btn_lock.pack(side=tk.RIGHT)
+        # No icon: the folder emoji is an outline glyph that all but disappears
+        # next to the solid padlock, and how Windows draws it is not ours to know.
+        self.btn_stage = ui.button(page.action_row, "Prepare folder",
+                                   self._on_stage_only, variant="secondary", size="lg")
+        self.btn_stage.pack(side=tk.RIGHT, padx=(0, 10))
 
         self.var_tuned.trace_add("write", lambda *_: self._on_tuned_changed())
         self.var_vin.trace_add("write", lambda *_: self._on_vin_typed())
@@ -1509,14 +1561,7 @@ class MhdLockTool(_TkBase):
 
     def _update_setup_hint(self):
         """The setup card only exists while something global is still missing."""
-        problems = []
-        exe = self.config_data.get("builder_exe", "")
-        if not exe or not os.path.isfile(exe):
-            problems.append("the path to your MHD map builder (TuningMapBuilder / "
-                            "MHD Map Encryption)")
-        key = self.config_data.get("toolkey", "")
-        if (not key or not os.path.isfile(key)) and not self.var_toolkey.get().strip():
-            problems.append("your .toolkey")
+        problems = missing_setup(self.config_data, self.var_toolkey.get())
         if problems:
             self.setup_msg.config(text="Still missing: " + " and ".join(problems) +
                                        ". Set it once under Settings — after that every "
@@ -1587,7 +1632,9 @@ class MhdLockTool(_TkBase):
             self.details.set_title("Details and builder log")
             self.var_summary.set(f"{report.changed_bytes:,} byte(s) changed · "
                                  f"{len(report.touched_tables)} table(s) · ready")
-            self.status.set("Ready to lock", "ok")
+            self.status.set("Ready to prepare"
+                            if self.config_data.get("prepare_only", False)
+                            else "Ready to lock", "ok")
         else:
             self.details.set_title(f"Details and builder log — {len(report.errors)} problem(s)")
             self.var_summary.set(report.errors[0].text if report.errors else "Checks failed")
@@ -1684,12 +1731,20 @@ class MhdLockTool(_TkBase):
         opts.grid_columnconfigure(1, weight=1)
         self.var_copy_builder = tk.BooleanVar()
         self.var_pass_workdir = tk.BooleanVar()
-        self._checkbox(builder.body, "Copy the builder into the working folder and run it there",
+        self.var_prepare_only = tk.BooleanVar()
+        self._checkbox(builder.body, "Copy the builder into the working folder",
                        self.var_copy_builder,
-                       "Mirrors a hand-built folder — the builder always sees the right files.")
+                       "Mirrors a hand-built folder — the builder always sees the right "
+                       "files, and it is the copy that runs when this app runs it.")
         self._checkbox(builder.body, "Pass the working folder as a command line argument",
                        self.var_pass_workdir,
                        "Only needed if your build of the tool expects a path argument.")
+        ui.hr(builder.body, bg=ui.BORDER_SOFT, pady=(10, 10))
+        self._checkbox(builder.body, "I convert to .mhd myself — only prepare the folder",
+                       self.var_prepare_only,
+                       "Preparing the folder becomes the main action and the builder is "
+                       "never started. Its path stays useful: it puts the .exe into the "
+                       "folder so you can run it there.")
 
         yours = page.card("Your files", hint="set once, used for every job")
         self.var_cfg_toolkey = tk.StringVar()
@@ -1752,8 +1807,10 @@ class MhdLockTool(_TkBase):
                              command=self._save_settings)
         box.pack(fill=tk.X)
         if hint:
-            tk.Label(holder, text=hint, bg=ui.CARD, fg=ui.TEXT_FAINT, font=ui.f("small"),
-                     anchor="w").pack(fill=tk.X, padx=(22, 0))
+            label = tk.Label(holder, text=hint, bg=ui.CARD, fg=ui.TEXT_FAINT,
+                             font=ui.f("small"), anchor="w", justify="left")
+            label.pack(fill=tk.X, padx=(22, 0))
+            ui.wrap_to_parent(label, inset=ui.px(30))
         return box
 
     # ── Settings plumbing ────────────────────────────────────────────────────
@@ -1765,6 +1822,7 @@ class MhdLockTool(_TkBase):
         self.var_timeout.set(str(cfg.get("timeout", 600)))
         self.var_copy_builder.set(bool(cfg.get("builder_in_workdir", True)))
         self.var_pass_workdir.set(bool(cfg.get("pass_workdir_arg", False)))
+        self.var_prepare_only.set(bool(cfg.get("prepare_only", False)))
         self.var_cfg_outdir.set(cfg.get("output_dir", ""))
         self.var_template.set(cfg.get("name_template", "{source}"))
         self.var_open_after.set(bool(cfg.get("open_after_success", True)))
@@ -1776,6 +1834,7 @@ class MhdLockTool(_TkBase):
                     self.var_template, self.var_cfg_toolkey, self.var_library):
             var.trace_add("write", lambda *_: self._save_settings())
         self._update_setup_hint()
+        self._apply_prepare_mode()
 
     def _collect_settings(self) -> dict:
         try:
@@ -1787,6 +1846,7 @@ class MhdLockTool(_TkBase):
             "builder_args": self.var_args.get().strip(),
             "pass_workdir_arg": bool(self.var_pass_workdir.get()),
             "builder_in_workdir": bool(self.var_copy_builder.get()),
+            "prepare_only": bool(self.var_prepare_only.get()),
             "output_dir": self.var_cfg_outdir.get().strip(),
             "name_template": self.var_template.get().strip() or "{source}",
             "keep_staging": bool(self.var_keep_staging.get()),
@@ -1804,6 +1864,34 @@ class MhdLockTool(_TkBase):
                                       else "Could not write the settings file")
         if hasattr(self, "setup_card"):
             self._update_setup_hint()
+        self._apply_prepare_mode()
+
+    def _apply_prepare_mode(self):
+        """Folder mode moves the weight from locking to preparing.
+
+        The lock button is withdrawn rather than greyed out: a disabled control
+        invites people to look for what would enable it, and here nothing would.
+        """
+        if not hasattr(self, "btn_stage"):
+            return
+        prepare = bool(self.config_data.get("prepare_only", False))
+        self.btn_stage.set_variant("primary" if prepare else "secondary")
+        # winfo_ismapped() is false for everything on a page that is not on
+        # screen, so it cannot answer "is this button packed?" - winfo_manager can.
+        packed = bool(self.btn_lock.winfo_manager())
+        if prepare and packed:
+            self.btn_lock.pack_forget()
+            self.btn_stage.pack_configure(padx=0)
+        elif not prepare and not packed:
+            self.btn_lock.pack(side=tk.RIGHT)
+            self.btn_stage.pack_forget()
+            self.btn_stage.pack(side=tk.RIGHT, padx=(0, 10))
+        if hasattr(self, "btn_batch_run"):
+            self.btn_batch_run.configure(
+                text="Prepare folders" if prepare else "Run batch  ▶")
+        self.shell.set_subtitle("lock", PREPARE_SUBTITLE if prepare else LOCK_SUBTITLE)
+        self.shell.set_subtitle("batch", BATCH_PREPARE_SUBTITLE if prepare
+                                else BATCH_SUBTITLE)
 
     def _reset_settings(self):
         self.config_data = dict(DEFAULT_CONFIG)
@@ -1891,19 +1979,21 @@ class MhdLockTool(_TkBase):
         if not report.ok:
             self.lock_page.banner.show("error", "Pre-flight failed — fix the points above first.")
             return
-        target = job.output_dir or os.path.dirname(job.tuned_bin)
-        workdir = unique_path(os.path.join(target, f"{safe_name(job.label, 'job')}_work"))
         try:
-            manifest = stage_job(job, workdir,
-                                 self.config_data.get("builder_exe", "")
-                                 if self.config_data.get("builder_in_workdir", True) else "")
+            manifest = prepare_folder(job, self.config_data)
         except OSError as exc:
             self.lock_page.banner.show("error", f"Could not prepare the folder: {exc}")
             return
+        workdir = manifest["workdir"]
         self.log.write("")
         self.log.write(f"Working folder prepared: {workdir}", "ok")
         for key in ("stock", "tuned", "xdf", "toolkey", "vin_file"):
             self.log.write(f"    {manifest[key]}", "dim")
+        if manifest["builder"]:
+            self.log.write(f"    {os.path.basename(manifest['builder'])}", "dim")
+        else:
+            self.log.write("    (no map builder in the folder — set its path under "
+                           "Settings to have it copied in)", "warn")
         self.lock_page.banner.show("ok", f"Working folder ready:\n{workdir}",
                                    action_text="Show in folder",
                                    action=lambda: ui.reveal_in_file_manager(workdir))
@@ -1913,8 +2003,9 @@ class MhdLockTool(_TkBase):
         if not self.batch_jobs:
             self.batch_page.banner.show("error", "The queue is empty.")
             return
+        prepare = bool(self.config_data.get("prepare_only", False))
         exe = self.config_data.get("builder_exe", "")
-        if not exe or not os.path.isfile(exe):
+        if not prepare and (not exe or not os.path.isfile(exe)):
             self.batch_page.banner.show(
                 "error", "No MHD map builder configured. Set its path in the Settings tab.",
                 action_text="Open settings", action=lambda: self.tabs.select("settings"))
@@ -1923,23 +2014,27 @@ class MhdLockTool(_TkBase):
         for index in range(len(self.batch_jobs)):
             self.batch_table.update_row(str(index), tag="dim")
             self._set_batch_cell(index, status="queued", output="")
-        self.batch_page.banner.show("busy", f"Running {len(self.batch_jobs)} job(s)…")
-        self._start(list(self.batch_jobs), target="batch")
+        verb = "Preparing" if prepare else "Running"
+        self.batch_page.banner.show("busy", f"{verb} {len(self.batch_jobs)} job(s)…")
+        self._start(list(self.batch_jobs), target="batch", prepare_only=prepare)
 
-    def _start(self, jobs, target):
+    def _start(self, jobs, target, prepare_only=False):
         if self._worker and self._worker.is_alive():
             return
         self._stop_event = threading.Event()
         self._busy(True)
         self.status.set("Working…", "busy")
-        self._worker = threading.Thread(target=self._work, args=(jobs, target), daemon=True)
+        self._worker = threading.Thread(target=self._work,
+                                        args=(jobs, target, prepare_only), daemon=True)
         self._worker.start()
 
     def _post(self, kind, **payload):
         self._events.put((kind, payload))
 
-    def _work(self, jobs, target):
-        """Worker thread: stage → run → collect, one isolated folder per job."""
+    def _work(self, jobs, target, prepare_only=False):
+        """Worker thread: stage → run → collect, one isolated folder per job.
+
+        In folder mode it stops after staging and keeps the folder."""
         cfg = dict(self.config_data)
         successes = failures = 0
         for index, job in enumerate(jobs):
@@ -1970,6 +2065,26 @@ class MhdLockTool(_TkBase):
                 failures += 1
                 self._post("job", index=index, status="failed", tag="error",
                            output=report.errors[0].text[:60] if report.errors else "pre-flight")
+                continue
+
+            if prepare_only:
+                try:
+                    manifest = prepare_folder(job, cfg)
+                except OSError as exc:
+                    failures += 1
+                    self._post("log", target=target, line=f"   ✕ {exc}", tag="error")
+                    self._post("job", index=index, status="failed", tag="error",
+                               output=str(exc)[:60])
+                    continue
+                folder = manifest["workdir"]
+                successes += 1
+                self._post("log", target=target, line=f"   ✓ {folder}", tag="ok")
+                if not manifest["builder"]:
+                    self._post("log", target=target,
+                               line="   (no map builder in the folder)", tag="warn")
+                self._post("job", index=index, status="prepared", tag="ok",
+                           output=os.path.basename(folder))
+                self._post("result", target=target, path=folder)
                 continue
 
             workdir = tempfile.mkdtemp(prefix="dme_mhd_")
@@ -2053,7 +2168,7 @@ class MhdLockTool(_TkBase):
                     self._post("log", target=target,
                                line=f"   kept working folder: {workdir}", tag="dim")
         self._post("done", target=target, successes=successes, failures=failures,
-                   total=len(jobs))
+                   total=len(jobs), prepared=prepare_only)
 
     def _drain_events(self):
         try:
@@ -2078,28 +2193,31 @@ class MhdLockTool(_TkBase):
     def _on_event_result(self, target, path):
         self._last_output = path
 
-    def _on_event_done(self, target, successes, failures, total):
+    def _on_event_done(self, target, successes, failures, total, prepared=False):
         self._busy(False)
         page = self.batch_page if target == "batch" else self.lock_page
+        done = "prepared" if prepared else "locked"
         if failures == 0 and successes:
-            tone, text = "ok", (f"{successes} of {total} job(s) locked."
-                                if total > 1 else "Locked successfully.")
+            tone, text = "ok", (f"{successes} of {total} job(s) {done}."
+                                if total > 1 else
+                                ("Folder prepared." if prepared else "Locked successfully."))
         elif successes:
-            tone, text = "warn", f"{successes} locked, {failures} failed — see the log."
+            tone, text = "warn", f"{successes} {done}, {failures} failed — see the log."
         else:
-            tone, text = "error", "Nothing was locked — see the log."
+            tone, text = "error", f"Nothing was {done} — see the log."
         last = getattr(self, "_last_output", "")
         if tone == "ok" and last:
             text = f"{text}\n{last}"
             page.banner.show(tone, text, action_text="Show in folder",
                              action=lambda p=last: ui.reveal_in_file_manager(p))
-            if self.config_data.get("open_after_success"):
+            if prepared or self.config_data.get("open_after_success"):
                 ui.reveal_in_file_manager(last)
         else:
             page.banner.show(tone, text)
-        self.status.set(f"{successes} locked · {failures} failed", tone)
+        self.status.set(f"{successes} {done} · {failures} failed", tone)
         if target == "batch":
-            self.var_batch_summary.set(f"{successes} locked · {failures} failed · {total} total")
+            self.var_batch_summary.set(f"{successes} {done} · {failures} failed · "
+                                       f"{total} total")
 
     # ── Batch plumbing ───────────────────────────────────────────────────────
 
