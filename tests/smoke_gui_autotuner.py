@@ -95,6 +95,41 @@ with zipfile.ZipFile(out_zip) as zf:
 print("BIN->ZIP OK:", backup._b2z_banner._text.cget("text").splitlines()[0])
 shoot("tab2")
 
+# ── an empty line in the split table ────────────────────────────────────────
+# Found on a real Mercedes GLE on 3.2.0: the page said the step was done,
+# counted the empty line as a part and reported that the sizes matched, and
+# then refused to write the archive because of it.
+backup._b2z_bin_var.set(out_bin)
+backup._b2z_out_var.set(out_zip)
+app.update()
+real = len(backup._part_rows)
+backup._add_part_row()
+app.update()
+assert backup._b2z_step2.state == "done", \
+    f"an empty line made the step {backup._b2z_step2.state}"
+assert backup._b2z_step2._note.cget("text") == str(real), \
+    f"the empty line was counted: {backup._b2z_step2._note.cget('text')} of {real}"
+assert dme_text.t("backup.parts.match") in backup._b2z_match.cget("text")
+
+# half filled is a real mistake and has to show at once, not at the button
+backup._part_rows[-1].name_var.set("extra.bin")
+app.update()
+assert backup._b2z_step2.state == "err", "a half filled line passed as done"
+assert dme_text.t("backup.parts.bad_row", n=real + 1) in backup._b2z_match.cget("text"), \
+    backup._b2z_match.cget("text")
+
+# and blank again, it packs, with the empty line simply left out
+backup._part_rows[-1].name_var.set("")
+app.update()
+second = os.path.join(tmp, "with_blank.zip")
+backup._b2z_out_var.set(second)
+backup._run_bin_to_zip()
+app.update()
+assert os.path.exists(second), "an empty line still blocked the archive"
+with zipfile.ZipFile(second) as zf:
+    assert zf.namelist()[:4] == ["iflash0.bin", "iflash1.bin", "dflash0.bin", "dflash1.bin"]
+print("blank line OK: not counted, not packed, not in the way")
+
 # error path -> banner, no crash
 backup._b2z_bin_var.set("")
 backup._run_bin_to_zip()

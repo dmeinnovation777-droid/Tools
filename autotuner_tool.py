@@ -90,21 +90,26 @@ def load_layouts() -> dict:
 
 
 def remember_layout(parts: list[dict], label: str = "", store: dict = None,
-                    how_to: str = "") -> dict:
+                    how_to: str = "", meta: dict = None) -> dict:
     """Store one layout under its total size. Returns the updated store.
 
-    `how_to` is the archive's own how-to-use-backup.html, kept with the layout so
-    a .bin split months later still gets the page in the right language."""
+    `how_to` is the archive's own how-to-use-backup.html and `meta` is what its
+    contents.ini said about the car. Neither can be worked out again from a
+    .bin: which car a dump came from is not written anywhere in the dump. So
+    both are carried across with the layout, and a .bin split months later
+    still goes back into an archive that names the right car in the right
+    language."""
     parts = [{"name": p["name"], "size": int(p["size"])} for p in parts if p.get("name")]
     if not parts:
         return store if store is not None else load_layouts()
     layouts = load_layouts() if store is None else store
     total = sum(p["size"] for p in parts)
     entry = {"label": label, "parts": parts}
-    if how_to:
-        entry["how_to"] = how_to
-    elif isinstance(layouts.get(str(total)), dict):
-        entry["how_to"] = layouts[str(total)].get("how_to", "")   # never lose one
+    known = layouts.get(str(total)) if isinstance(layouts.get(str(total)), dict) else {}
+    # Never lose one that is already held: a later split without the archive
+    # in hand passes neither, and would otherwise wipe both.
+    entry["how_to"] = how_to or known.get("how_to", "")
+    entry["meta"] = {k: v for k, v in (meta or {}).items() if v} or known.get("meta", {})
     layouts[str(total)] = entry
     if len(layouts) > LAYOUT_LIMIT:
         for key in list(layouts)[:len(layouts) - LAYOUT_LIMIT]:
@@ -132,6 +137,13 @@ def remembered_how_to(size: int, store: dict = None) -> str:
     layouts = load_layouts() if store is None else store
     entry = layouts.get(str(int(size)))
     return (entry or {}).get("how_to", "")
+
+
+def remembered_meta(size: int, store: dict = None) -> dict:
+    """What the archive of this total size said about the car."""
+    layouts = load_layouts() if store is None else store
+    entry = layouts.get(str(int(size)))
+    return dict((entry or {}).get("meta", {}))
 
 
 def presets_for_size(size: int) -> list[str]:
@@ -331,6 +343,20 @@ def read_archive_info(zip_path: str) -> dict:
 # GUI
 # ─────────────────────────────────────────────────────────────────────────────
 
+# What contents.ini calls each field, and what this code calls it. Nine of the
+# fourteen have a box on the page; the other five have none and are simply
+# carried across from the archive the .bin came out of. Without this the series
+# and the kW of a customer's car would quietly go missing on the way back.
+INI_KEYS = {
+    "VehicleVIN": "vin",            "VehicleType": "type",
+    "VehicleProducer": "make",      "VehicleSeries": "series",
+    "VehicleBuild": "model",        "VehicleModel": "variant",
+    "VehicleModelYear": "year",     "EcuUsage": "usage",
+    "EcuProducer": "ecu_maker",     "EcuBuild": "ecu_model",
+    "EngineType": "fuel",           "OutputPS": "ps",
+    "OutputKW": "kw",               "ReadingHardware": "hardware",
+}
+
 META_FIELDS = [
     ("VehicleProducer", "Make", "e.g. Lamborghini"),
     ("VehicleBuild", "Model", "e.g. Huracan"),
@@ -398,6 +424,26 @@ class PartRow:
         self.swatch.config(bg=self.COLOURS[(row - 1) % len(self.COLOURS)])
         self._changed()
 
+    @property
+    def is_blank(self) -> bool:
+        """Nothing has been typed here yet, so this is not a part.
+
+        Pressing "add a part" makes an empty line to fill in. Until it is
+        filled in it is a promise, not a part: it may not be counted, it may
+        not be packed, and above all it may not stop the archive from being
+        written.
+        """
+        return not self.name_var.get().strip() and not self.size_var.get().strip()
+
+    @property
+    def is_broken(self) -> bool:
+        """Half filled in: a name without a size, or a size without a name.
+
+        This one is a real mistake and has to be said out loud straight away,
+        not held back until the button is pressed.
+        """
+        return not self.is_blank and self.get() is None
+
     def get(self) -> dict | None:
         name = self.name_var.get().strip()
         if not name:
@@ -406,7 +452,16 @@ class PartRow:
             size = int(self.size_var.get().replace(',', '').replace(' ', '').replace('.', ''))
         except ValueError:
             return None
+        if size <= 0:
+            return None
         return {'name': name, 'size': size}
+
+    def mark(self, broken: bool):
+        """Show on the line itself which one is the matter."""
+        colour = ui.ERR if broken else ui.FIELD_BORDER
+        for field in (self.name_entry, self.size_entry):
+            if hasattr(field, "_edge"):
+                field._edge(colour)
 
     def destroy(self):
         for w in (self.index_lbl, self.swatch, self.name_entry, self.size_entry,
@@ -664,9 +719,11 @@ class BackupUI:
         self.app.update_idletasks()
 
         ok, msg, parts = zip_to_bin(zip_path, out_path)
-        how_to = (self._archive_info or {}).get("how_to", "")
+        info = self._archive_info or {}
+        how_to = info.get("how_to", "")
         if ok:
-            remember_layout(parts, os.path.basename(zip_path), how_to=how_to)
+            remember_layout(parts, os.path.basename(zip_path), how_to=how_to,
+                            meta=info.get("meta", {}))
             self.banner.show("ok", msg, action_text=t("word.open_folder"),
                              action=lambda: ui.reveal_in_file_manager(out_path))
             self.app.set_status(t("word.done"), "ok")
@@ -799,7 +856,8 @@ class BackupUI:
             else:
                 self._parts_empty.config(text=t("backup.parts.empty"))
             self._parts_empty.grid(row=0, column=0, columnspan=6, sticky="ew")
-        self._b2z_step2.set_note(str(len(self._part_rows)) if self._part_rows else "")
+        real = [row for row in self._part_rows if not row.is_blank]
+        self._b2z_step2.set_note(str(len(real)) if real else "")
         self._update_totals()
 
     def _bin_size(self) -> int:
@@ -807,17 +865,36 @@ class BackupUI:
         return os.path.getsize(path) if path and os.path.exists(path) else 0
 
     def _update_totals(self):
-        total = sum(row.size for row in self._part_rows)
+        """What the screen says has to be what pressing the button will do.
+
+        An empty line is left out of all of it: out of the count, out of the
+        sum, and out of the archive. A half filled one is named here, at the
+        moment it becomes half filled, instead of stopping the run later.
+        """
+        real = [row for row in self._part_rows if not row.is_blank]
+        broken = next((i for i, row in enumerate(self._part_rows, 1)
+                       if row.is_broken), None)
+        for row in self._part_rows:
+            row.mark(row.is_broken)
+
+        total = sum(row.size for row in real)
         file_size = self._bin_size()
         self._b2z_total_var.set(
             f"{t('backup.parts.sum')} {total:,} B ({format_bytes(total)})  \u00b7  "
             f"{format_bytes(file_size)}")
         ready = False
-        if file_size == 0:
+        if broken is not None:
+            message = t("backup.parts.bad_row", n=broken)
+            self._b2z_match.config(text="\u2715  " + message, fg=ui.ERR)
+            self._b2z_summary.set(message)
+        elif file_size == 0:
             self._b2z_match.config(text="")
+        elif not real:
+            self._b2z_match.config(text="")
+            self._b2z_summary.set(t("backup.parts.empty"))
         elif total == file_size:
             self._b2z_match.config(text="\u2713  " + t("backup.parts.match"), fg=ui.OK)
-            self._b2z_summary.set(f"{len(self._part_rows)} \u00b7 {total:,} "
+            self._b2z_summary.set(f"{len(real)} \u00b7 {total:,} "
                                   f"{t('word.bytes')}")
             ready = True
         else:
@@ -827,7 +904,7 @@ class BackupUI:
             self._b2z_summary.set(t("backup.parts.mismatch", delta=delta))
         self._b2z_step1.set_state("done" if file_size else "now")
         self._b2z_step2.set_state("done" if ready else
-                                  ("err" if file_size and self._part_rows else "next"))
+                                  ("err" if file_size and real else "next"))
         self._b2z_step3.set_state("done" if ready and self._b2z_out_var.get().strip()
                                   else ("now" if ready else "next"))
         self._b2z_step4.set_state("now" if ready and self._b2z_out_var.get().strip()
@@ -883,6 +960,11 @@ class BackupUI:
             for part in parts:
                 self._add_part_row(name=part["name"], size=part["size"])
             self._refresh_parts()
+            # The car comes back with the layout. Which car a dump came from
+            # is written nowhere in the dump, so if it is not carried across
+            # here it is gone, and the archive would go back to the customer
+            # naming no car at all.
+            self._restore_meta(remembered_meta(size))
             self.banner.show("ok", t("backup.parts.restored", n=len(parts),
                                      source=label or t("word.manual")))
             self.app.set_status(t("word.ready"), "ok")
@@ -901,6 +983,13 @@ class BackupUI:
                                            name=candidates[0]))
             return
         self._empty_hint(size)
+
+    def _restore_meta(self, meta: dict):
+        """Put remembered vehicle data into the fields, without overwriting typing."""
+        for key, value in (meta or {}).items():
+            var = self._meta_vars.get(key)
+            if var is not None and value and not var.get().strip():
+                var.set(value)
 
     def _empty_hint(self, size: int):
         self._parts_empty.config(text=t("backup.parts.unknown", size=f"{size:,}"))
@@ -966,30 +1055,34 @@ class BackupUI:
         if not out_path:
             self.banner.show("error", t("backup.b2z.step3"))
             return
-        if not self._part_rows:
-            self.banner.show("error", t("err.no_parts"))
-            return
-
+        # An empty line is not a part, so it is neither packed nor complained
+        # about. A half filled one is already marked on screen; the same words
+        # are repeated here for whoever pressed the button without looking.
         parts_config = []
         for i, row in enumerate(self._part_rows, 1):
+            if row.is_blank:
+                continue
             part = row.get()
             if part is None:
                 self.banner.show("error", t("backup.parts.bad_row", n=i))
                 return
             parts_config.append(part)
+        if not parts_config:
+            self.banner.show("error", t("err.no_parts"))
+            return
 
-        meta = {
-            'make': self._meta_vars['VehicleProducer'].get(),
-            'model': self._meta_vars['VehicleBuild'].get(),
-            'variant': self._meta_vars['VehicleModel'].get(),
-            'year': self._meta_vars['VehicleModelYear'].get(),
-            'ecu_model': self._meta_vars['EcuBuild'].get(),
-            'ecu_maker': self._meta_vars['EcuProducer'].get(),
-            'fuel': self._meta_vars['EngineType'].get(),
-            'ps': self._meta_vars['OutputPS'].get(),
-            'vin': self._meta_vars['VehicleVIN'].get(),
-            'hardware': 'Autotuner',
-        }
+        # Everything the original archive said about the car, then whatever is
+        # in the boxes on top of it. The five fields with no box - series,
+        # type, usage, kW, hardware - survive this way instead of coming back
+        # empty in the customer's archive.
+        remembered = remembered_meta(os.path.getsize(bin_path))
+        meta = {INI_KEYS[key]: value for key, value in remembered.items()
+                if key in INI_KEYS and value}
+        for key, var in self._meta_vars.items():
+            typed = var.get().strip()
+            if typed:
+                meta[INI_KEYS[key]] = typed
+        meta.setdefault('hardware', 'Autotuner')
 
         self.app.set_status(t("word.running"), "busy")
         self.banner.show("busy", t("word.running"))

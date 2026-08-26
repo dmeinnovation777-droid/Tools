@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-3.2.0.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-3.2.1.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -23,6 +23,32 @@ ein Uninstaller.
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Korrektur in 3.2.1: Backup, BIN nach ZIP
+
+**Eine leere Zeile in der Aufteilung hat das Packen blockiert.** Gemeldet an
+einem echten Mercedes GLE MG1CP002 Bench Backup. Die Seite zeigte den Schritt
+als erledigt, zählte drei Teile und meldete „Größen stimmen überein", und beim
+Druck auf Packen kam „Zeile 3 hat keinen gültigen Namen oder keine gültige
+Größe". Drei Stellen sagten ja und der Knopf sagte nein.
+
+Eine leere Zeile ist eine Zeile, die noch ausgefüllt werden will. Sie ist kein
+Teil: sie wird nicht mitgezählt, nicht gepackt und steht nicht im Weg. Eine
+halb ausgefüllte Zeile ist dagegen ein echter Fehler und wird sofort rot
+angezeigt, an der Zeile selbst, statt erst beim Knopf.
+
+**Die Fahrzeugangaben gingen auf dem Rückweg verloren.** Beim selben Auto: das
+Archiv nannte einen W167 GLE 450 AMG, Benzin, 367 PS, 270 kW. Auseinander
+genommen und wieder zusammengebaut nannte das Archiv für den Kunden gar kein
+Auto mehr, und aus dem Benziner war still ein Diesel geworden.
+
+In welchem Auto ein Speicherabzug gesessen hat, steht nirgends im Abzug. Es
+kann also nur aus dem Archiv kommen, aus dem er stammt. Diese Angaben werden
+jetzt zusammen mit der Aufteilung gemerkt und beim Packen wieder eingetragen,
+alle vierzehn Felder, auch die fünf ohne Eingabefeld auf der Seite.
+
+Damit kommt ein Archiv vollständig zurück: beide Abbilder, die contents.ini und
+die Hilfeseite sind byteweise dieselben wie im Original.
 
 ## Neu in 3.2.0: das Design
 

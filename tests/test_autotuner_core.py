@@ -1,5 +1,6 @@
 """Unit tests for the AutoTuner Backup Tool core (no GUI / no display needed)."""
 
+import inspect
 import os
 import sys
 import tempfile
@@ -362,6 +363,130 @@ class TestTheRememberedPage(unittest.TestCase):
 
     def test_an_unknown_size_gives_an_empty_page(self):
         self.assertEqual(at.remembered_how_to(999999), "")
+
+
+class TestABlankLineIsNotAPart(unittest.TestCase):
+    """Found on a real Mercedes GLE MG1CP002 bench backup, on 3.2.0.
+
+    The split table had the two parts from the archive and one empty line
+    underneath. The page said the step was done, counted three parts and
+    reported that the sizes matched, and then refused to write the archive
+    with "line 3 has no valid name or size". Three places said yes and the
+    button said no.
+
+    An empty line is a line waiting to be filled in. It is not a part, so it
+    is not counted, not packed and not in the way. A half filled one is a real
+    mistake and has to be visible the moment it happens.
+    """
+
+    def test_the_blank_line_is_told_apart_from_the_broken_one(self):
+        import inspect
+        source = inspect.getsource(at.PartRow)
+        self.assertIn("def is_blank", source)
+        self.assertIn("def is_broken", source)
+
+    def test_a_size_of_nothing_is_refused(self):
+        """A name with a zero size would put an empty member in the archive."""
+        source = inspect.getsource(at.PartRow.get)
+        self.assertIn("if size <= 0:", source)
+        self.assertIn("return None", source)
+
+    def test_packing_skips_the_blank_line(self):
+        source = inspect.getsource(at.BackupUI._run_bin_to_zip)
+        self.assertIn("if row.is_blank:", source)
+        self.assertIn("continue", source)
+        # And an all blank table is still an error, not an empty archive.
+        self.assertIn("if not parts_config:", source)
+
+    def test_the_count_leaves_the_blank_line_out(self):
+        source = inspect.getsource(at.BackupUI._refresh_parts)
+        self.assertIn("if not row.is_blank", source)
+
+
+class TestTheCarComesBackWithTheLayout(unittest.TestCase):
+    """Which car a dump came from is written nowhere in the dump.
+
+    Same Mercedes: the archive named a W167 GLE 450 AMG, petrol, 367 PS,
+    270 kW. Taken apart and put back together, the archive that went to the
+    customer named no car at all, and the fuel had quietly become DIESEL. Five
+    of the fourteen fields have no box on the page at all, so they could only
+    ever come from the archive itself.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = {}
+        self.parts = [{"name": "iflash0.bin", "size": 64},
+                      {"name": "dflash0.bin", "size": 16}]
+        self.meta = {
+            "VehicleVIN": "", "VehicleType": "Passenger car",
+            "VehicleProducer": "Mercedes", "VehicleSeries": "W167",
+            "VehicleBuild": "GLE", "VehicleModel": "450 AMG (3.0T) MHEV",
+            "VehicleModelYear": "2018", "EcuUsage": "Engine",
+            "EcuProducer": "Bosch", "EcuBuild": "MG1CP002",
+            "EngineType": "PETROL", "OutputPS": "367", "OutputKW": "270",
+            "ReadingHardware": "Autotuner",
+        }
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_the_store_keeps_it(self):
+        store = at.remember_layout(self.parts, "gle.zip", store=self.store,
+                                   meta=self.meta)
+        kept = at.remembered_meta(80, store=store)
+        self.assertEqual(kept["VehicleSeries"], "W167")
+        self.assertEqual(kept["OutputKW"], "270")
+        self.assertEqual(kept["EngineType"], "PETROL")
+
+    def test_a_later_split_without_the_archive_does_not_wipe_it(self):
+        """Splitting the same size again, with nothing to hand, may not erase."""
+        store = at.remember_layout(self.parts, "gle.zip", store=self.store,
+                                   meta=self.meta, how_to="<html>de</html>")
+        store = at.remember_layout(self.parts, "by hand", store=store)
+        kept = at.remembered_meta(80, store=store)
+        self.assertEqual(kept.get("VehicleSeries"), "W167")
+        self.assertEqual(at.remembered_how_to(80, store=store), "<html>de</html>")
+
+    def test_every_field_of_the_ini_has_a_name_here(self):
+        """build_contents_ini writes fourteen. All fourteen must be carryable."""
+        written = at.build_contents_ini({})
+        names = [line.split(" = ")[0] for line in written.splitlines()
+                 if " = " in line and not line.startswith(("EcuX", "AuthorTool"))]
+        for name in names:
+            self.assertIn(name, at.INI_KEYS,
+                          f"{name} is written but can never be carried across")
+
+    def test_the_round_trip_keeps_the_whole_ini(self):
+        """Archive to .bin to archive, and contents.ini comes back identical."""
+        source = os.path.join(self.tmp.name, "backup.zip")
+        with zipfile.ZipFile(source, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("iflash0.bin", b"\x11" * 64)
+            zf.writestr("dflash0.bin", b"\x22" * 16)
+            zf.writestr("contents.ini", at.build_contents_ini(
+                {at.INI_KEYS[k]: v for k, v in self.meta.items()}))
+            zf.writestr(at.HOW_TO_NAME, "<html>de</html>")
+
+        info = at.read_archive_info(source)
+        combined = os.path.join(self.tmp.name, "combined.bin")
+        at.zip_to_bin(source, combined)
+        store = at.remember_layout(info["parts"], "gle.zip", store=self.store,
+                                   meta=info["meta"], how_to=info["how_to"])
+
+        # What the page would hand over: everything remembered, nothing typed.
+        kept = at.remembered_meta(80, store=store)
+        meta = {at.INI_KEYS[k]: v for k, v in kept.items()
+                if k in at.INI_KEYS and v}
+        meta.setdefault("hardware", "Autotuner")
+        again = os.path.join(self.tmp.name, "again.zip")
+        ok, _msg = at.bin_to_zip(combined, again, self.parts, ini_meta=meta,
+                                 how_to_html=at.remembered_how_to(80, store=store))
+        self.assertTrue(ok)
+
+        first, second = zipfile.ZipFile(source), zipfile.ZipFile(again)
+        for name in ("iflash0.bin", "dflash0.bin", "contents.ini", at.HOW_TO_NAME):
+            self.assertEqual(first.read(name), second.read(name),
+                             f"{name} did not survive the round trip")
 
 
 class TestPresetsAgainstRealReads(unittest.TestCase):
