@@ -291,6 +291,9 @@ CATALOG: dict[str, dict] = {
     "backup.parts.restored": _(
         "{n} Teile aus {source} übernommen.",
         "{n} parts taken from {source}."),
+    "backup.parts.restored_car": _(
+        "{n} Teile aus {source} übernommen. Fahrzeug: {car}.",
+        "{n} parts taken from {source}. Vehicle: {car}."),
     "backup.parts.ambiguous": _(
         "Diese Größe passt zu {all}. Die Aufteilung ist dieselbe, eingetragen ist "
         "{picked}. Prüfe das Feld für das Steuergerät.",

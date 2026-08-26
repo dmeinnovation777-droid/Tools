@@ -964,9 +964,14 @@ class BackupUI:
             # is written nowhere in the dump, so if it is not carried across
             # here it is gone, and the archive would go back to the customer
             # naming no car at all.
-            self._restore_meta(remembered_meta(size))
-            self.banner.show("ok", t("backup.parts.restored", n=len(parts),
-                                     source=label or t("word.manual")))
+            car = self._restore_meta(remembered_meta(size))
+            if car:
+                self.banner.show("ok", t("backup.parts.restored_car",
+                                         n=len(parts), car=car,
+                                         source=label or t("word.manual")))
+            else:
+                self.banner.show("ok", t("backup.parts.restored", n=len(parts),
+                                         source=label or t("word.manual")))
             self.app.set_status(t("word.ready"), "ok")
             return
         candidates = presets_for_size(size)
@@ -984,12 +989,20 @@ class BackupUI:
             return
         self._empty_hint(size)
 
-    def _restore_meta(self, meta: dict):
-        """Put remembered vehicle data into the fields, without overwriting typing."""
+    def _restore_meta(self, meta: dict) -> str:
+        """Put remembered vehicle data into the fields, without overwriting typing.
+
+        Gives back the car in a few words, so the page can say out loud which
+        one came back. Silently restoring it would be the same kind of quiet
+        as silently losing it.
+        """
         for key, value in (meta or {}).items():
             var = self._meta_vars.get(key)
             if var is not None and value and not var.get().strip():
                 var.set(value)
+        named = [(meta or {}).get(key, "").strip() for key in
+                 ("VehicleProducer", "VehicleBuild", "VehicleModelYear")]
+        return " ".join(word for word in named if word)
 
     def _empty_hint(self, size: int):
         self._parts_empty.config(text=t("backup.parts.unknown", size=f"{size:,}"))
