@@ -1785,14 +1785,14 @@ class LockUI:
         self.flow = flow
 
         # ── 1 · the only file you have to pick ──────────────────────────────
-        step = flow.step(t("lock.step1"), state="now")
+        step = flow.step(t("lock.step1"), state="now", symbol="file")
         self.step_file = step
         self.row_tuned = self._file_row(step.body, self.var_tuned, self._pick_tuned,
                                         hint=t("lock.step1.hint"))
         self.row_tuned.pack(fill=tk.X)
 
         # ── 2 · what the tool found on its own ──────────────────────────────
-        step = flow.step(t("lock.step2"))
+        step = flow.step(t("lock.step2"), symbol="shield")
         self.step_check = step
         marks = tk.Frame(step.body, bg=ui.BG)
         marks.pack(fill=tk.X)
@@ -1816,7 +1816,7 @@ class LockUI:
                        browse_text=t("word.browse")).pack(fill=tk.X, pady=(ui.px(8), 0))
 
         # ── 3 · the only thing you have to type ─────────────────────────────
-        step = flow.step(t("lock.step3"))
+        step = flow.step(t("lock.step3"), symbol="hash")
         self.step_vin = step
         self.row_vin = self._file_row(step.body, self.var_vin, self._paste_vin,
                                       hint=t("lock.step3.hint"), width=22,
@@ -1832,7 +1832,7 @@ class LockUI:
         self.lbl_vin.pack(fill=tk.X, pady=(ui.px(8), 0))
 
         # ── 4 · the action, and everything it says while it works ───────────
-        step = flow.step(t("lock.step4"))
+        step = flow.step(t("lock.step4"), symbol="lock")
         self.step_run = step
         self.lbl_run = tk.Label(step.body, text=t("lock.step4.hint"), bg=ui.BG,
                                 fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w",
@@ -1892,7 +1892,7 @@ class LockUI:
         flow.pack(fill=tk.X)
         self.batch_flow = flow
 
-        step = flow.step(t("batch.step1"), state="now")
+        step = flow.step(t("batch.step1"), state="now", symbol="list")
         self.step_files = step
         self.batch_table = ui.Table(step.body, columns=[
             {"key": "customer", "title": t("batch.col.customer"), "width": 150},
@@ -1940,7 +1940,7 @@ class LockUI:
                   variant="ghost", size="sm", bg=ui.BG).pack(side=tk.RIGHT,
                                                              padx=(0, ui.px(8)))
 
-        step = flow.step(t("batch.step2"))
+        step = flow.step(t("batch.step2"), symbol="shield")
         self.step_batch_check = step
         self.batch_marks = tk.Frame(step.body, bg=ui.BG)
         self.batch_marks.pack(fill=tk.X)
@@ -1950,7 +1950,7 @@ class LockUI:
         self.lbl_batch_check.pack(fill=tk.X)
         ui.wrap_to_parent(self.lbl_batch_check)
 
-        step = flow.step(t("batch.step3"))
+        step = flow.step(t("batch.step3"), symbol="lock")
         self.step_batch_run = step
         hint = tk.Label(step.body, text=t("batch.step3.hint"), bg=ui.BG,
                         fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w", justify="left")

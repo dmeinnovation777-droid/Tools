@@ -10,12 +10,15 @@ Everything here is plain tkinter, no third party packages and no images beyond
 the embedded logo in dme_brand.py.
 """
 
+import math
 import os
 import subprocess
 import sys
 import time
 import tkinter as tk
 from tkinter import font as tkfont
+
+import dme_paint as paint
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Palette
@@ -122,6 +125,11 @@ def _pick(root, candidates, fallback):
 def init(root) -> None:
     """Resolve the display scale, fonts and ttk styles. Call once, right after Tk()."""
     global SCALE
+    # A picture belongs to the Tk that made it, and the sizes below depend on
+    # the scale about to be worked out. A new window therefore starts with an
+    # empty drawer: keeping the old pictures would hand the new window images
+    # that no longer exist.
+    paint.forget()
     try:
         dpi = float(root.winfo_fpixels("1i"))
     except tk.TclError:
@@ -594,14 +602,14 @@ class Switch(tk.Canvas):
         else:
             # The track colours travel with the knob instead of snapping.
             track, knob = mix(BORDER, ACCENT, self._pos), "#FFFFFF"
-        r = h / 2
-        self.create_oval(0, 0, h, h, fill=track, outline=track)
-        self.create_oval(w - h, 0, w, h, fill=track, outline=track)
-        self.create_rectangle(r, 0, w - r, h, fill=track, outline=track)
+        self._track_picture = paint.panel(w, h, h / 2.0, track, self._outer)
+        self.create_image(0, 0, anchor="nw", image=self._track_picture)
         pad = max(1, px(2))
         d = h - 2 * pad
         x = pad + (w - 2 * pad - d) * self._pos
-        self.create_oval(x, pad, x + d, pad + d, fill=knob, outline=BORDER_SOFT)
+        self._knob_picture = paint.panel(d, d, d / 2.0, knob, track,
+                                         border=BORDER_SOFT)
+        self.create_image(x, pad, anchor="nw", image=self._knob_picture)
 
     def configure(self, cnf=None, **kw):
         options = dict(cnf or {}, **kw)
@@ -710,10 +718,37 @@ _VARIANTS = {
     "danger":    dict(bg=CARD, fg=ERR, hover=ERR_BG, press=ERR_BG, border=BORDER),
 }
 _SIZES = {
-    "lg": dict(padx=22, pady=11, font="button", radius=12),
-    "md": dict(padx=17, pady=8, font="button", radius=11),
-    "sm": dict(padx=11, pady=5, font="small", radius=9),
+    "lg": dict(padx=20, pady=11, font="button", radius=10),
+    "md": dict(padx=17, pady=9, font="button", radius=10),
+    "sm": dict(padx=13, pady=6, font="small", radius=8),
 }
+
+# A button is lifted off the page by a hair. The amber one carries its own
+# colour into its shadow, because a grey shadow under a warm fill looks like
+# dirt. A ghost is flat: it is not a surface, it is a word you can press.
+_SHADOWS = {
+    "primary":   (1, 3, ACCENT_INK, 0.35),
+    "secondary": (1, 2, TEXT, 0.06),
+    "danger":    (1, 2, TEXT, 0.06),
+    "ghost":     None,
+}
+
+
+def _shadow_for(variant):
+    """The shadow of a variant, in real pixels for the screen in front of us."""
+    shadow = _SHADOWS.get(variant)
+    if not shadow:
+        return None
+    dy, blur, colour, alpha = shadow
+    return (px(dy), px(blur), colour, alpha)
+
+
+def _shadow_room(shadow) -> int:
+    """How many pixels a shadow needs below the shape it belongs to."""
+    if not shadow:
+        return 0
+    dy, blur = shadow[0], shadow[1]      # already in real pixels
+    return int(math.ceil(dy + blur + px(paint._SHADOW_ROOM)))
 
 
 class RoundedButton(tk.Canvas):
@@ -736,6 +771,9 @@ class RoundedButton(tk.Canvas):
         # 42 px button, and a pill at that height reads as a chip, not a button.
         self._radius = px(dims["radius"])
         self._border = spec.get("border")
+        self._shadow = _shadow_for(variant)
+        self._below = _shadow_room(self._shadow)
+        self._picture = None
 
         super().__init__(parent, bg=self._outer, highlightthickness=0, bd=0,
                          takefocus=1, cursor="hand2")
@@ -758,34 +796,36 @@ class RoundedButton(tk.Canvas):
         probe = tkfont.Font(font=self._font)
         width = probe.measure(self._text) + self._padx * 2
         height = probe.metrics("linespace") + self._pady * 2
-        self.configure(width=width, height=height)
+        # The shadow falls below the shape, so the canvas has to be that much
+        # taller or it would be cut off. The shape itself keeps its height.
+        self.configure(width=width, height=height + self._below)
 
-    def _draw(self):
+    def _draw(self, fill=None):
+        """Put the painted shape down and the word on top of it.
+
+        The shape is a picture worked out against the colour behind the button,
+        because tkinter has no rounded corner and no shadow of its own. Asking
+        for the same button twice costs nothing: the picture is kept.
+        """
         self.delete("all")
         w, h = self.winfo_width(), self.winfo_height()
         if w <= 1 or h <= 1:
             return
-        fill = self._fill if self._state != "disabled" else CARD_ALT
-        outline = self._border or fill
-        radius = max(px(4), min(self._radius, (h - 2) // 2))
-        if self._radius * 2 >= h - 2:      # asked for a pill
-            # A pill. Tk's smooth polygon never quite reaches the asked-for
-            # radius, so the caps are drawn as real half circles instead.
-            cap = h - 2
-            self.create_oval(1, 1, 1 + cap, h - 1, fill=fill, outline=outline,
-                             tags="shape")
-            self.create_oval(w - 1 - cap, 1, w - 1, h - 1, fill=fill,
-                             outline=outline, tags="shape")
-            self.create_rectangle(1 + cap / 2, 1, w - 1 - cap / 2, h - 1,
-                                  fill=fill, outline=fill, tags="shape")
+        shape_h = h - self._below
+        if self._state == "disabled":
+            fill, shadow, border = CARD_ALT, None, None
         else:
-            self.create_polygon(
-                _round_points(1, 1, w - 1, h - 1, radius), smooth=True,
-                splinesteps=24, fill=fill, outline=outline, tags="shape")
-        self._shape = "shape"
+            fill = fill or self._fill
+            shadow = self._shadow
+            border = self._border
+        picture = paint.panel(w, shape_h, self._radius, fill, self._outer,
+                              border=border, border_width=max(1, px(1)),
+                              shadow=shadow)
+        self._picture = picture                    # tk keeps no reference itself
+        self._shape = self.create_image(0, 0, anchor="nw", image=picture)
         colour = self._fg if self._state != "disabled" else TEXT_FAINT
-        self._label = self.create_text(w / 2, h / 2, text=self._text, fill=colour,
-                                       font=self._font)
+        self._label = self.create_text(w / 2, shape_h / 2, text=self._text,
+                                       fill=colour, font=self._font)
 
     def set_variant(self, variant):
         """Re-rank a button in place - the same action, a different weight.
@@ -797,13 +837,17 @@ class RoundedButton(tk.Canvas):
         self._hover, self._press = spec["hover"], spec["press"]
         self._fg = spec["fg"]
         self._border = spec.get("border")
+        self._shadow = _shadow_for(variant)
+        below = _shadow_room(self._shadow)
+        if below != self._below:
+            self._below = below
+            self._measure()
         self._draw()
 
     def _paint(self, colour):
         if self._state == "disabled" or self._shape is None:
             return
-        self.itemconfigure(self._shape, fill=colour,
-                           outline=self._border or colour)
+        self._draw(fill=colour)
 
     def _release(self, _event=None):
         self._paint(self._hover)
@@ -876,16 +920,117 @@ def icon_button(parent, text, command=None, bg=CARD, fg=TEXT_FAINT, hover_fg=ERR
 # ─────────────────────────────────────────────────────────────────────────────
 # Inputs
 # ─────────────────────────────────────────────────────────────────────────────
+class Field(tk.Frame):
+    """A value in a rounded well.
+
+    tkinter has no rounded entry and no smooth edge, so the well is a picture
+    lying behind an ordinary entry. The entry keeps its own square corners, it
+    just sits far enough inside the well that they are never on top of a
+    rounded one. Everything an entry can do it still does; this only changes
+    what it looks like.
+    """
+
+    PAD_X = 12
+    PAD_Y = 8
+    RADIUS = 10
+
+    #: Which settings belong to the entry inside rather than to the well.
+    _INNER = frozenset((
+        "state", "width", "justify", "font", "textvariable", "fg", "foreground",
+        "show", "validate", "validatecommand", "invalidcommand", "exportselection",
+        "insertbackground", "readonlybackground", "disabledforeground",
+    ))
+
+    def __init__(self, parent, textvariable, mono=True, width=None,
+                 justify="left", bg=None, **kw):
+        outer = bg or parent["bg"]
+        super().__init__(parent, bg=outer)
+        self._outer = outer
+        self._picture = None
+        self._border = FIELD_BORDER
+        self._size = (0, 0)
+
+        self._well = tk.Label(self, bg=outer, bd=0, highlightthickness=0)
+        self._well.place(x=0, y=0, relwidth=1, relheight=1)
+
+        self.entry = tk.Entry(self, textvariable=textvariable, bg=FIELD, fg=TEXT,
+                              insertbackground=ACCENT, relief="flat", bd=0,
+                              highlightthickness=0, disabledbackground=CARD_ALT,
+                              disabledforeground=TEXT_FAINT,
+                              readonlybackground=CARD_ALT,
+                              font=f("mono" if mono else "body"),
+                              justify=justify, **kw)
+        if width:
+            self.entry.configure(width=width)
+        self.entry.pack(fill=tk.BOTH, expand=True,
+                        padx=px(self.PAD_X), pady=px(self.PAD_Y))
+        # The entry is made after the well, so it is on top of it.
+        self.entry.bind("<FocusIn>", lambda _e: self._edge(ACCENT), add="+")
+        self.entry.bind("<FocusOut>", lambda _e: self._edge(FIELD_BORDER), add="+")
+        self.bind("<Configure>", self._resized)
+
+    # ── the well ────────────────────────────────────────────────────────────
+    def _resized(self, event):
+        if (event.width, event.height) == self._size or event.width <= 1:
+            return
+        self._size = (event.width, event.height)
+        self._repaint()
+
+    def _repaint(self):
+        width, height = self._size
+        if width <= 1 or height <= 1:
+            return
+        fill = FIELD
+        if str(self.entry.cget("state")) in ("disabled", "readonly"):
+            fill = CARD_ALT
+        self._picture = paint.panel(width, height, px(self.RADIUS), fill,
+                                    self._outer, border=self._border,
+                                    border_width=max(1, px(1)))
+        self._well.configure(image=self._picture)
+
+    def _edge(self, colour):
+        """A field being typed into says so with its own edge."""
+        if colour == self._border:
+            return
+        self._border = colour
+        self._repaint()
+
+    # ── it still behaves like the entry it holds ────────────────────────────
+    def configure(self, cnf=None, **kw):
+        options = dict(cnf or {}, **kw)
+        inner = {key: options.pop(key) for key in list(options)
+                 if key in self._INNER}
+        if inner:
+            self.entry.configure(**inner)
+            if "state" in inner:
+                self._repaint()
+        if options:
+            super().configure(**options)
+        return None
+
+    config = configure
+
+    def cget(self, key):
+        if key in self._INNER:
+            return self.entry.cget(key)
+        return super().cget(key)
+
+    def focus_set(self):
+        self.entry.focus_set()
+
+    focus = focus_set
+
+    def __getattr__(self, name):
+        # Anything a Frame does not have - get, insert, select_range, icursor -
+        # belongs to the entry. Only reached when the lookup has already failed.
+        if name.startswith("_") or "entry" not in self.__dict__:
+            raise AttributeError(name)
+        return getattr(self.__dict__["entry"], name)
+
+
 def entry(parent, textvariable, mono=True, width=None, justify="left", **kw):
-    ent = tk.Entry(parent, textvariable=textvariable, bg=FIELD, fg=TEXT,
-                   insertbackground=ACCENT, relief="flat", bd=0,
-                   highlightthickness=1, highlightbackground=FIELD_BORDER,
-                   highlightcolor=ACCENT, disabledbackground=CARD_ALT,
-                   disabledforeground=TEXT_FAINT, readonlybackground=CARD_ALT,
-                   font=f("mono" if mono else "body"), justify=justify, **kw)
-    if width:
-        ent.configure(width=width)
-    return ent
+    return Field(parent, textvariable, mono=mono, width=width, justify=justify,
+                 **kw)
 
 
 def field_label(parent, text, bg=CARD, fg=TEXT_DIM):
@@ -962,24 +1107,45 @@ class _Chip(tk.Frame):
     def __init__(self, parent, text, command=None, radius=9, outer=None,
                  pad=(13, 7), font_key="tab", bg=None):
         outer = outer or parent["bg"]
-        super().__init__(parent, bg=bg or outer)
-        self._label = tk.Label(self, text=text, bg=self["bg"], fg=TEXT_DIM,
+        super().__init__(parent, bg=outer)
+        self._outer = outer
+        self._radius = px(radius)
+        self._fill = bg or outer
+        self._picture = None
+        self._size = (0, 0)
+        # The rounded shape is a picture behind the word, worked out against
+        # whatever the chip is standing on.
+        self._back = tk.Label(self, bg=outer, bd=0, highlightthickness=0)
+        self._back.place(x=0, y=0, relwidth=1, relheight=1)
+        self._label = tk.Label(self, text=text, bg=self._fill, fg=TEXT_DIM,
                                font=f(font_key), padx=px(pad[0]), pady=px(pad[1]))
         self._label.pack()
-        self._corners = round_corners(self, px(radius), outer_bg=outer)
+        self.bind("<Configure>", self._resized)
         if command is not None:
             for widget in (self, self._label):
                 widget.configure(cursor="hand2")
                 widget.bind("<Button-1>", lambda _e: command())
 
+    def _resized(self, event):
+        if (event.width, event.height) == self._size or event.width <= 1:
+            return
+        self._size = (event.width, event.height)
+        self._repaint()
+
+    def _repaint(self):
+        width, height = self._size
+        if width <= 1 or height <= 1:
+            return
+        self._picture = paint.panel(width, height, self._radius, self._fill,
+                                    self._outer)
+        self._back.configure(image=self._picture)
+
     def set_fill(self, bg, fg, font_key=None):
-        self.configure(bg=bg)
+        self._fill = bg
         self._label.configure(bg=bg, fg=fg)
         if font_key:
             self._label.configure(font=f(font_key))
-        # The corner canvas keeps the OUTER colour; the arc on it is the fill.
-        for corner in self._corners:
-            corner.itemconfigure("all", fill=bg, outline=bg)
+        self._repaint()
 
     def set_text(self, text):
         self._label.configure(text=text)
@@ -1005,13 +1171,21 @@ class _Strip(tk.Canvas):
 
     def __init__(self, parent, items, command=None, bg=None, font_key="tab",
                  pad=(13, 7), radius=9, fill=HOVER, on_fg=TEXT, off_fg=TEXT_FAINT,
-                 gap=2):
+                 gap=2, track=None, track_radius=8, inset=0, shadow=None):
         self._bg = bg or parent["bg"]
         super().__init__(parent, bg=self._bg, highlightthickness=0, bd=0)
         self._command = command
         self._font = tkfont.Font(font=f(font_key))
         self._fill, self._on_fg, self._off_fg = fill, on_fg, off_fg
         self._radius = px(radius)
+        # A strip may sit on a pill of its own: that is what tells a switch
+        # (two choices, one of them true) apart from a row of tabs.
+        self._track = track
+        self._track_radius = px(track_radius)
+        self._inset = px(inset)
+        self._shadow = shadow
+        self._pill_bg = track or self._bg
+        self._pictures = {}
         self._active = None
         self._motion = None
         self._slots = {}
@@ -1020,21 +1194,37 @@ class _Strip(tk.Canvas):
 
         padx, pady = px(pad[0]), px(pad[1])
         height = self._font.metrics("linespace") + pady * 2
-        x = 0
+        x = self._inset
         for key, label in items:
             width = self._font.measure(label) + padx * 2
             self._slots[key] = (x, width)
             self._labels[key] = self.create_text(
-                x + width / 2, height / 2, text=label, font=f(font_key),
-                fill=self._off_fg)
+                x + width / 2, self._inset + height / 2, text=label,
+                font=f(font_key), fill=self._off_fg)
             x += width + px(gap)
-        self.configure(width=max(1, x - px(gap)), height=height)
+        total_w = max(1, x - px(gap) + self._inset)
+        total_h = height + self._inset * 2
+        self.configure(width=total_w, height=total_h)
         self._height = height
 
-        self._pill = self.create_polygon(
-            _round_points(0, 0, 1, 1, self._radius), smooth=True, splinesteps=18,
-            fill=self._bg, outline=self._bg)
+        if self._track:
+            self._track_picture = paint.panel(total_w, total_h,
+                                              self._track_radius, self._track,
+                                              self._bg)
+            self.tag_lower(self.create_image(0, 0, anchor="nw",
+                                             image=self._track_picture))
+
+        # The highlight is a painted picture, because tkinter draws neither a
+        # rounded corner nor a smooth edge. It is worked out once per width and
+        # kept, so sliding from one word to the next costs nothing after the
+        # first time.
+        self._pill = self.create_image(0, self._inset, anchor="nw",
+                                       image=self._pill_picture(1))
         self.tag_lower(self._pill)
+        if self._track:
+            self.tag_raise(self._pill)
+            for item in self._labels.values():
+                self.tag_raise(item)
         self.bind("<Button-1>", self._click)
         self.bind("<Motion>", self._hover)
         self.bind("<Leave>", lambda _e: self._paint_text())
@@ -1047,9 +1237,19 @@ class _Strip(tk.Canvas):
                 return key
         return None
 
+    def _pill_picture(self, width):
+        """The highlight at one width, worked out once and then remembered."""
+        width = max(1, int(round(width)))
+        kept = self._pictures.get(width)
+        if kept is None:
+            kept = paint.panel(width, self._height, self._radius, self._fill,
+                               self._pill_bg, shadow=self._shadow)
+            self._pictures[width] = kept
+        return kept
+
     def _place_pill(self, left, width):
-        self.coords(self._pill,
-                    *_round_points(left, 0, left + width, self._height, self._radius))
+        self.itemconfigure(self._pill, image=self._pill_picture(width))
+        self.coords(self._pill, left, self._inset)
 
     def _paint_text(self, pointer=None):
         for key, item in self._labels.items():
@@ -1076,7 +1276,6 @@ class _Strip(tk.Canvas):
         previous = self._active
         self._active = key
         target = self._slots[key]
-        self.itemconfigure(self._pill, fill=self._fill, outline=self._fill)
         if previous is None or not animated:
             self._place_pill(*target)
         else:
@@ -1114,36 +1313,22 @@ class _Strip(tk.Canvas):
 
 
 class Segmented(_Strip):
-    """Two or three ways of doing the same thing, side by side in one well."""
+    """Two or three ways of doing the same thing, side by side in one pill.
+
+    A grounding pill, and the chosen one lifted out of it in white. It is the
+    same strip the tabs are made of, only sitting on a ground of its own: that
+    is what tells a switch, where one of two is true, apart from a row of tabs,
+    where one of four is open.
+    """
 
     def __init__(self, parent, options, command=None, bg=None, font_key="tab"):
-        outer = bg or parent["bg"]
-        holder = tk.Frame(parent, bg=CARD_ALT, highlightthickness=1,
-                          highlightbackground=BORDER_SOFT, highlightcolor=BORDER_SOFT)
-        round_corners(holder, px(10), outer_bg=outer, border=BORDER_SOFT)
-        super().__init__(holder, options, command=command, bg=CARD_ALT,
-                         font_key=font_key, pad=(15, 6), radius=8, fill=CARD,
-                         on_fg=TEXT, off_fg=TEXT_FAINT, gap=0)
-        super_pack = tk.Canvas.pack
-        super_pack(self, padx=px(3), pady=px(3))
-        self._holder = holder
+        super().__init__(parent, options, command=command, bg=bg,
+                         font_key=font_key, pad=(13, 6), radius=8, fill=CARD,
+                         on_fg=TEXT, off_fg=TEXT_FAINT, gap=0, track=HOVER,
+                         track_radius=10, inset=3,
+                         shadow=(px(1), px(2), TEXT, 0.10))
         if options:
             self.select(options[0][0], notify=False, animated=False)
-
-    # The caller packs the control; what it really packs is the well around it.
-    def pack(self, **kw):
-        self._holder.pack(**kw)
-        return self
-
-    def pack_forget(self):
-        self._holder.pack_forget()
-
-    def grid(self, **kw):
-        self._holder.grid(**kw)
-        return self
-
-    def winfo_manager(self):
-        return self._holder.winfo_manager()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1155,13 +1340,70 @@ class Segmented(_Strip):
 # Everything a step produces - a log, an error, a result - appears inside that
 # step, which is the whole reason there is no second window any more.
 
+# A ring is thirty pixels across. Done is a filled circle with a drawn tick,
+# running is white with a thick amber edge and its number, failed is a filled
+# circle with a drawn cross, and coming is white with a thin grey edge. The
+# tick and the cross are drawn rather than typed: a glyph from a font sits
+# differently in every font and is never quite in the middle.
+RING_SIZE = 30
 _RING = {
-    "done": dict(fill=OK, fg="#FFFFFF", line=OK, glyph="\u2713", halo=None),
-    "now":  dict(fill=ACCENT, fg=ON_ACCENT, line=ACCENT, glyph=None, halo=WARN_BG),
-    "err":  dict(fill=ERR, fg="#FFFFFF", line=ERR, glyph="\u2715", halo=ERR_BG),
-    "next": dict(fill=CARD, fg="#8E8E93", line=BORDER, glyph=None, halo=None),
+    "done": dict(fill=OK, edge=None, width=0, ink="#FFFFFF", mark="tick"),
+    "now":  dict(fill=CARD, edge=ACCENT, width=3, ink=TEXT, mark=None),
+    "err":  dict(fill=ERR, edge=None, width=0, ink="#FFFFFF", mark="cross"),
+    "next": dict(fill=CARD, edge=BORDER, width=1.5, ink=TEXT_FAINT, mark=None),
 }
-_STEP_TITLE = {"done": TEXT, "now": TEXT, "err": TEXT, "next": "#8E8E93"}
+_STEP_TITLE = {"done": TEXT, "now": TEXT, "err": TEXT, "next": TEXT_FAINT}
+
+# The six step symbols, drawn on a twenty four grid, two units thick, round
+# ends. A symbol says what a step is about before the title is read.
+SYMBOL_SIZE = 15
+_SYMBOLS = {
+    "file":    [[(5, 2), (14, 2), (18, 6), (18, 22), (5, 22), (5, 2)],
+                [(14, 2), (14, 6), (18, 6)]],
+    "shield":  [[(12, 2), (20, 6), (20, 13), (12, 20), (4, 13), (4, 6), (12, 2)],
+                [(8, 11), (11, 14), (16, 8)]],
+    "hash":    [[(4, 9), (20, 9)], [(4, 16), (20, 16)],
+                [(10, 3), (8, 22)], [(17, 3), (15, 22)]],
+    "lock":    [[(7, 11), (7, 7), (12, 3), (17, 7), (17, 11)],
+                [(4, 11), (20, 11), (20, 21), (4, 21), (4, 11)]],
+    "list":    [[(9, 6), (21, 6)], [(9, 12), (21, 12)], [(9, 18), (21, 18)],
+                [(4, 6)], [(4, 12)], [(4, 18)]],
+    "archive": [[(3, 4), (21, 4), (21, 9), (3, 9), (3, 4)],
+                [(5, 9), (5, 21), (19, 21), (19, 9)],
+                [(10, 14), (14, 14)]],
+}
+
+
+def symbol_picture(name, bg, colour=TEXT_FAINT, size=None):
+    """One step symbol as a picture, worked out against the page behind it."""
+    size = size or px(SYMBOL_SIZE)
+    scale = size / 24.0
+    paths = [[(x * scale, y * scale) for x, y in path]
+             for path in _SYMBOLS[name]]
+    return paint.strokes(size, size, paths, colour, bg,
+                         thickness=max(1.2, 2.0 * scale))
+
+
+# Drawn on a thirty by thirty grid and scaled to whatever the screen asks for.
+_MARKS = {
+    "tick":  [[(9.0, 15.5), (13.5, 20.0), (21.5, 10.5)]],
+    "cross": [[(10.5, 10.5), (19.5, 19.5)], [(19.5, 10.5), (10.5, 19.5)]],
+}
+
+
+def ring_picture(state, size, bg):
+    """The picture of one step ring, worked out against the page behind it."""
+    spec = _RING[state]
+    scale = size / float(RING_SIZE)
+    edge_width = max(1, px(spec["width"])) if spec["width"] else 1.0
+    if spec["mark"]:
+        paths = [[(x * scale, y * scale) for x, y in path]
+                 for path in _MARKS[spec["mark"]]]
+        return paint.strokes(size, size, paths, spec["ink"], bg,
+                             thickness=max(1.5, 3.0 * scale),
+                             base=(size, size, size / 2.0, spec["fill"], bg))
+    return paint.panel(size, size, size / 2.0, spec["fill"], bg,
+                       border=spec["edge"], border_width=edge_width)
 
 
 class Step(tk.Frame):
@@ -1169,11 +1411,13 @@ class Step(tk.Frame):
 
     RAIL = 38
 
-    def __init__(self, parent, number, title, state="next", note="", bg=BG):
+    def __init__(self, parent, number, title, state="next", note="", bg=BG,
+                 symbol=None):
         super().__init__(parent, bg=bg)
         self._bg = bg
         self._number = number
         self._state = state
+        self._symbol = symbol
         self.columnconfigure(1, weight=1)
 
         rail = tk.Frame(self, bg=bg, width=px(self.RAIL))
@@ -1191,6 +1435,11 @@ class Step(tk.Frame):
         head = tk.Frame(content, bg=bg, height=px(self.RAIL))
         head.pack(fill=tk.X)
         head.pack_propagate(False)
+        if symbol:
+            self._mark = symbol_picture(symbol, bg)
+            tk.Label(head, image=self._mark, bg=bg, bd=0,
+                     highlightthickness=0).pack(side=tk.LEFT,
+                                                padx=(0, px(8)))
         self._title = tk.Label(head, text=title, bg=bg, fg=_STEP_TITLE[state],
                                font=f("step"), anchor="w")
         self._title.pack(side=tk.LEFT)
@@ -1203,7 +1452,6 @@ class Step(tk.Frame):
         self.body = tk.Frame(content, bg=bg)
         self.body.pack(fill=tk.X, pady=(px(4), px(20)))
         self._motion = None
-        self._colours = self._target_colours()
         self._paint()
 
     # ── the rail ────────────────────────────────────────────────────────────
@@ -1218,31 +1466,21 @@ class Step(tk.Frame):
 
     # ── state ───────────────────────────────────────────────────────────────
     def set_state(self, state):
+        """Swap the ring. A step becoming done is a fact, not a transition.
+
+        Until 3.1.1 the ring faded from one colour to the next. A picture
+        cannot be faded without working out a new one for every frame, and the
+        fade bought nothing: what a ring says is either true or it is not.
+        """
         if state == self._state:
             return
-        origin = dict(self._colours)
         self._state = state
-        target = self._target_colours()
-
-        def step(fraction):
-            self._colours = {key: mix(origin[key], target[key], fraction)
-                             for key in target}
-            self._paint()
-
-        self._motion = animate(self, 130, step, previous=self._motion)
         self._title.configure(fg=_STEP_TITLE[state])
-
-    def settle(self):
-        if self._motion is not None:
-            self._motion.cancel()
-            self._motion = None
-        self._colours = self._target_colours()
         self._paint()
 
-    def _target_colours(self):
-        spec = _RING[self._state]
-        return {"fill": spec["fill"], "fg": spec["fg"], "line": spec["line"],
-                "halo": spec["halo"] or self._bg}
+    def settle(self):
+        """Nothing is in flight any more, but the callers still say this."""
+        self._paint()
 
     @property
     def state(self):
@@ -1266,20 +1504,17 @@ class Step(tk.Frame):
 
     def _paint(self):
         spec = _RING[self._state]
-        colours = self._colours
         canvas = self._ring
         canvas.delete("all")
         full = px(self.RAIL)
-        d = px(30)
-        pad = (full - d) / 2
-        if colours["halo"] != self._bg:
-            canvas.create_oval(1, 1, full - 1, full - 1, fill=colours["halo"],
-                               outline=colours["halo"])
-        canvas.create_oval(pad, pad, pad + d, pad + d, fill=colours["fill"],
-                           outline=colours["line"], width=max(1, px(1.5)))
-        canvas.create_text(full / 2, full / 2 + px(0.5),
-                           text=spec["glyph"] or str(self._number),
-                           fill=colours["fg"], font=f("ring"))
+        size = px(RING_SIZE)
+        at = (full - size) / 2
+        self._picture = ring_picture(self._state, size, self._bg)
+        canvas.create_image(at, at, anchor="nw", image=self._picture)
+        if spec["mark"] is None:
+            canvas.create_text(full / 2, full / 2 + px(0.5),
+                               text=str(self._number), fill=spec["ink"],
+                               font=f("ring"))
 
 
 class Flow(tk.Frame):
@@ -1290,11 +1525,11 @@ class Flow(tk.Frame):
         self._bg = bg
         self._steps = []
 
-    def step(self, title, state="next", note=""):
+    def step(self, title, state="next", note="", symbol=None):
         if self._steps:
             self._steps[-1].connect()
         item = Step(self, len(self._steps) + 1, title, state=state, note=note,
-                    bg=self._bg)
+                    bg=self._bg, symbol=symbol)
         item.pack(fill=tk.X)
         item.last()
         if len(self._steps) >= 1:
@@ -1311,6 +1546,71 @@ class Flow(tk.Frame):
     @property
     def steps(self):
         return list(self._steps)
+
+
+class Running(tk.Canvas):
+    """The line that walks while a step is working.
+
+    A track and a runner, both painted. The runner is a picture that is moved
+    along the track, which is the one kind of movement tkinter is good at. It
+    appears when the action is pressed and it stays until the step is honestly
+    finished or honestly failed, so it never says work is going on when it is
+    not.
+    """
+
+    TRACK = 5
+    WIDTH = 620
+    SHARE = 0.28            # how much of the track the runner covers
+    MS = 1300               # one pass, left to right
+
+    def __init__(self, parent, bg=BG, width=None):
+        self._track_w = px(width or self.WIDTH)
+        self._track_h = px(self.TRACK)
+        super().__init__(parent, bg=bg, highlightthickness=0, bd=0,
+                         width=self._track_w, height=self._track_h)
+        self._bg = bg
+        radius = self._track_h / 2.0
+        self._back = paint.panel(self._track_w, self._track_h, radius, HOVER, bg)
+        runner_w = max(px(8), int(self._track_w * self.SHARE))
+        self._runner_w = runner_w
+        self._runner = paint.panel(runner_w, self._track_h, radius, ACCENT, HOVER)
+        self.create_image(0, 0, anchor="nw", image=self._back)
+        self._item = self.create_image(-runner_w, 0, anchor="nw",
+                                       image=self._runner)
+        self._motion = None
+        self._on = False
+
+    def start(self):
+        if self._on:
+            return
+        self._on = True
+        self._walk()
+
+    def _walk(self):
+        span = self._track_w + self._runner_w
+
+        def move(fraction):
+            self.coords(self._item, -self._runner_w + span * fraction, 0)
+
+        def again():
+            if self._on:
+                self._walk()
+
+        # Steady, not eased: a thing that is working does not speed up and
+        # slow down, and an eased loop looks like a heartbeat.
+        self._motion = animate(self, self.MS, move, done=again,
+                               ease=lambda t: t, previous=self._motion)
+
+    def stop(self):
+        self._on = False
+        if self._motion is not None:
+            self._motion.cancel()
+            self._motion = None
+        self.coords(self._item, -self._runner_w, 0)
+
+    @property
+    def running(self):
+        return self._on
 
 
 class Banner(tk.Frame):
@@ -1853,10 +2153,12 @@ class TopNav(tk.Frame):
     height and the page gets the whole width back.
     """
 
-    def __init__(self, parent, brand, items, command, bg=SURFACE):
+    def __init__(self, parent, brand, items, command, bg=SURFACE,
+                 languages=None, language=None, on_language=None):
         super().__init__(parent, bg=bg, height=px(60))
         self._bg = bg
         self._command = command
+        self.language = None
 
         row = tk.Frame(self, bg=bg)
         row.pack(fill=tk.BOTH, expand=True, padx=px(26))
@@ -1879,6 +2181,20 @@ class TopNav(tk.Frame):
 
         state = tk.Frame(row, bg=bg)
         state.pack(side=tk.RIGHT)
+
+        # The language sits up here, on every page, instead of on a line
+        # buried in the settings. It is one of the few things somebody changes
+        # while looking at something else, so it has to be reachable from
+        # wherever that is.
+        if languages:
+            self.language = _Strip(
+                row, languages, command=on_language, bg=bg, font_key="section",
+                pad=(9, 4), radius=6, fill=CARD, on_fg=TEXT, off_fg=TEXT_FAINT,
+                gap=0, track=HOVER, track_radius=8, inset=2,
+                shadow=(px(1), px(2), TEXT, 0.10))
+            self.language.pack(side=tk.RIGHT, padx=(0, px(20)))
+            if language:
+                self.language.select(language, notify=False, animated=False)
         self._dot = tk.Canvas(state, width=px(9), height=px(9), bg=bg,
                               highlightthickness=0, bd=0)
         self._dot.pack(side=tk.LEFT, padx=(0, px(8)))
@@ -1904,7 +2220,9 @@ class TopNav(tk.Frame):
         colour = _TONE.get(tone, _TONE["idle"])[0]
         self._dot.delete("all")
         size = px(9)
-        self._dot.create_oval(0, 0, size, size, fill=colour, outline=colour)
+        # Painted, not drawn: a nine pixel oval from tk has corners on it.
+        self._dot_picture = paint.panel(size, size, size / 2.0, colour, self._bg)
+        self._dot.create_image(0, 0, anchor="nw", image=self._dot_picture)
 
 
 class Shell(tk.Frame):
@@ -1914,7 +2232,8 @@ class Shell(tk.Frame):
     and only the topmost one is seen, so switching areas moves nothing.
     """
 
-    def __init__(self, root, brand, product, version, nav, on_select):
+    def __init__(self, root, brand, product, version, nav, on_select,
+                 languages=None, language=None, on_language=None):
         super().__init__(root, bg=BG)
         self._on_select = on_select
         # Copied, not referenced: set_subtitle writes here, and the caller's nav
@@ -1926,7 +2245,8 @@ class Shell(tk.Frame):
 
         self.nav = TopNav(self, brand,
                           [(entry["key"], entry["label"]) for entry in nav],
-                          self.select)
+                          self.select, languages=languages, language=language,
+                          on_language=on_language)
         self.nav.pack(fill=tk.X)
         self.nav.pack_propagate(False)
         tk.Frame(self, bg=HAIRLINE, height=1).pack(fill=tk.X)

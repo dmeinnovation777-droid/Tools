@@ -25,6 +25,9 @@ Rules for this file, so it stays a word list and not a second program:
 
 LANGUAGES = ("de", "en")
 LANGUAGE_NAMES = {"de": "Deutsch", "en": "English"}
+#: What the switch in the top bar says. Two letters, because it sits beside
+#: the state and has to stay out of the way of it.
+LANGUAGE_SHORT = {"de": "DE", "en": "EN"}
 DEFAULT_LANGUAGE = "de"
 
 _current = DEFAULT_LANGUAGE

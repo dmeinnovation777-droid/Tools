@@ -133,8 +133,10 @@ class DmeApp(_TkBase):
         return bool(self.config_data.get("prepare_only", False))
 
     def _build(self):
-        self.shell = ui.Shell(self, brand, APP_NAME, APP_VERSION, self._nav(),
-                              self._show_page)
+        self.shell = ui.Shell(
+            self, brand, APP_NAME, APP_VERSION, self._nav(), self._show_page,
+            languages=[(code, text.LANGUAGE_SHORT[code]) for code in text.LANGUAGES],
+            language=text.language(), on_language=self.set_language)
         self.shell.pack(fill=tk.BOTH, expand=True)
         self.status = self.shell.status
         self.host = self.shell.host
@@ -171,25 +173,10 @@ class DmeApp(_TkBase):
     def _build_settings(self):
         page = ui.Page(self.host, width=860)
 
-        general = ui.GroupedList(page.body, t("settings.group.general"))
-        general.pack(fill=tk.X, pady=(0, ui.px(20)))
-        row = general.row()
-        line = tk.Frame(row, bg=ui.CARD)
-        line.pack(fill=tk.X)
-        copy = tk.Frame(line, bg=ui.CARD)
-        copy.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        tk.Label(copy, text=t("word.language"), bg=ui.CARD, fg=ui.TEXT,
-                 font=ui.f("body"), anchor="w").pack(fill=tk.X)
-        note = tk.Label(copy, text=t("word.language_hint"), bg=ui.CARD,
-                        fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w",
-                        justify="left")
-        note.pack(fill=tk.X, pady=(ui.px(2), 0))
-        ui.wrap_to_parent(note, inset=ui.px(190))
-        self.lang_switch = ui.Segmented(
-            line, [(code, text.LANGUAGE_NAMES[code]) for code in text.LANGUAGES],
-            command=self.set_language, bg=ui.CARD)
-        self.lang_switch.pack(side=tk.RIGHT, padx=(ui.px(14), 0))
-        self.lang_switch.select(text.language(), notify=False)
+        # The language used to sit on a line in here. It sits in the bar now,
+        # on every page, because it is one of the few things somebody changes
+        # while looking at something else.
+        self.lang_switch = self.shell.nav.language
 
         self.lock.build_settings(page)
 
@@ -210,6 +197,9 @@ class DmeApp(_TkBase):
         text.set_language(code)
         self.config_data["language"] = code
         self._lock_tool.save_config(self.config_data)
+        switch = self.shell.nav.language
+        if switch is not None:
+            switch.select(code, notify=False, animated=False)
         self.rebuild()
 
     def rebuild(self):

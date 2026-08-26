@@ -520,19 +520,19 @@ class BackupUI:
         flow.pack(fill=tk.X)
         self._z2b_flow = flow
 
-        step = flow.step(t("backup.z2b.step1"), state="now")
+        step = flow.step(t("backup.z2b.step1"), state="now", symbol="archive")
         self._z2b_step1 = step
         self._z2b_path = self._file_row(step.body, self._z2b_zip_var, self._browse_zip,
                                         hint=t("backup.z2b.step1.hint"))
         self._z2b_path.pack(fill=tk.X)
 
-        step = flow.step(t("backup.z2b.step2"))
+        step = flow.step(t("backup.z2b.step2"), symbol="list")
         self._z2b_step2 = step
         self._z2b_log = ui.LogView(step.body, height=11)
         self._z2b_log.pack(fill=tk.BOTH, expand=True)
         self._z2b_log.set_text(t("backup.z2b.step2.idle"), "dim")
 
-        step = flow.step(t("backup.z2b.step3"))
+        step = flow.step(t("backup.z2b.step3"), symbol="file")
         self._z2b_step3 = step
         self._z2b_out_path = self._file_row(step.body, self._z2b_out_var,
                                             self._browse_zip_output,
@@ -540,7 +540,7 @@ class BackupUI:
                                             browse=t("word.save"))
         self._z2b_out_path.pack(fill=tk.X)
 
-        step = flow.step(t("backup.z2b.step4"))
+        step = flow.step(t("backup.z2b.step4"), symbol="lock")
         self._z2b_step4 = step
         note = tk.Label(step.body, text=t("backup.z2b.foot"), bg=ui.BG,
                         fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w", justify="left")
@@ -684,13 +684,13 @@ class BackupUI:
         flow.pack(fill=tk.X)
         self._b2z_flow = flow
 
-        step = flow.step(t("backup.b2z.step1"), state="now")
+        step = flow.step(t("backup.b2z.step1"), state="now", symbol="file")
         self._b2z_step1 = step
         self._b2z_path = self._file_row(step.body, self._b2z_bin_var, self._browse_bin,
                                         hint=t("backup.b2z.step1.hint"))
         self._b2z_path.pack(fill=tk.X)
 
-        step = flow.step(t("backup.b2z.step2"))
+        step = flow.step(t("backup.b2z.step2"), symbol="list")
         self._b2z_step2 = step
         toolbar = tk.Frame(step.body, bg=ui.BG)
         toolbar.pack(fill=tk.X, pady=(0, ui.px(10)))
@@ -739,7 +739,7 @@ class BackupUI:
         self._b2z_match = tk.Label(totals, text="", bg=ui.BG, font=ui.f("small"))
         self._b2z_match.pack(side=tk.RIGHT)
 
-        step = flow.step(t("backup.b2z.step3"))
+        step = flow.step(t("backup.b2z.step3"), symbol="archive")
         self._b2z_step3 = step
         self._b2z_out_path = self._file_row(step.body, self._b2z_out_var,
                                             self._browse_zip_out,
@@ -747,7 +747,7 @@ class BackupUI:
                                             browse=t("word.save"))
         self._b2z_out_path.pack(fill=tk.X)
 
-        step = flow.step(t("backup.b2z.step4"))
+        step = flow.step(t("backup.b2z.step4"), symbol="lock")
         self._b2z_step4 = step
         meta = ui.Collapsible(step.body, t("backup.meta"), bg=ui.BG)
         meta.pack(fill=tk.X)
