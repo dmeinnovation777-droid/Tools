@@ -155,6 +155,50 @@ assert meta["VehicleVIN"] == "", f"the wiped VIN came back: {meta['VehicleVIN']!
 assert meta["VehicleSeries"] == "LB724", "clearing the VIN took the series with it"
 print("vehicle data OK: carried across, and a cleared field stays cleared")
 
+# ── the split belongs to the file it was made for ───────────────────────────
+# Reported from the workshop: after a Mercedes, a VW Caddy of a different size
+# was picked and the page still showed the Mercedes split. It then refused to
+# pack, because two parts added up to somebody else's file.
+other_zip = os.path.join(tmp, "other_backup.zip")
+with zipfile.ZipFile(other_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+    zf.writestr("iflash0.bin", b"\x0a" * 2048)
+    zf.writestr("dflash0.bin", b"\x0b" * 256)
+    zf.writestr("contents.ini", at.build_contents_ini({"ecu_model": "MD1CS004"}))
+    zf.writestr(at.HOW_TO_NAME, at.HOW_TO_USE_HTML)
+other_bin = os.path.join(tmp, "other-MD1CS004_combined.bin")
+backup._set_direction("z2b")
+backup._z2b_zip_var.set(other_zip)
+backup._z2b_out_var.set(other_bin)
+backup._run_zip_to_bin()
+app.update()
+backup._set_direction("b2z")
+app.update()
+
+backup._b2z_bin_var.set(out_bin)              # the four part file from above
+app.update()
+assert sum(r.size for r in backup._part_rows) == os.path.getsize(out_bin)
+backup._b2z_bin_var.set(other_bin)            # now a different file
+app.update()
+assert sum(r.size for r in backup._part_rows) == os.path.getsize(other_bin), \
+    (f"the split still belongs to the last file: "
+     f"{sum(r.size for r in backup._part_rows)} for a file of "
+     f"{os.path.getsize(other_bin)}")
+assert [r.name_var.get() for r in backup._part_rows] == ["iflash0.bin", "dflash0.bin"]
+print("split follows the file OK:", [r.name_var.get() for r in backup._part_rows])
+
+# and the engine answers in the language the window is in
+backup._b2z_bin_var.set(out_bin)
+app.update()
+backup._part_rows[0].size_var.set("1")
+app.update()
+backup._b2z_out_var.set(os.path.join(tmp, "never.zip"))
+backup._run_bin_to_zip()
+app.update()
+shown = backup.banner._text.cget("text")
+assert shown.startswith(dme_text.t("backup.msg.size_mismatch", total="", actual="")[:20]), \
+    f"the engine answered in the wrong language: {shown!r}"
+print("engine speaks the window's language OK")
+
 # error path -> banner, no crash
 backup._b2z_bin_var.set("")
 backup._run_bin_to_zip()

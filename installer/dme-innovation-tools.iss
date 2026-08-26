@@ -13,7 +13,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "3.2.2"
+  #define AppVersion "3.2.3"
 #endif
 
 #define AppName      "DME Innovation Tools"

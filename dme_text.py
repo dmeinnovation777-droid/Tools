@@ -291,6 +291,29 @@ CATALOG: dict[str, dict] = {
     "backup.parts.restored": _(
         "{n} Teile aus {source} übernommen.",
         "{n} parts taken from {source}."),
+    # What the engine itself says. It used to answer in English while the rest
+    # of the window spoke German, which is how a tuner ends up reading a size
+    # mismatch in a second language on a Friday evening.
+    "backup.msg.combined": _(
+        "{n} Teile zusammengefügt · {bytes} Bytes",
+        "Combined {n} part(s) · {bytes} bytes"),
+    "backup.msg.created": _(
+        "{n} Teile geschrieben · {bytes} Bytes",
+        "Created {n} part(s) · {bytes} bytes"),
+    "backup.msg.no_bins": _(
+        "In diesem Archiv ist keine .bin Datei.",
+        "No .bin file in this archive."),
+    "backup.msg.not_zip": _(
+        "Die Datei ist kein gültiges ZIP Archiv.",
+        "The file is not a valid ZIP archive."),
+    "backup.msg.size_mismatch": _(
+        "Die Teile ergeben zusammen {total} Bytes, die .bin hat {actual} Bytes. "
+        "Passe die Größen an, bis beide gleich sind.",
+        "The parts add up to {total} bytes, the .bin has {actual} bytes. "
+        "Adjust the sizes until the two agree."),
+    "backup.msg.failed": _(
+        "Fehlgeschlagen: {what}",
+        "Failed: {what}"),
     "backup.parts.several_cars": _(
         "{n} Teile übernommen. Für diese Größe sind mehrere Fahrzeuge gemerkt: "
         "{cars}. Welches es ist, steht nicht in der .bin, also trage die "

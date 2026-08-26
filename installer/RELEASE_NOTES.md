@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-3.2.2.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-3.2.3.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -23,6 +23,24 @@ ein Uninstaller.
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Korrektur in 3.2.3: die Aufteilung gehört zur gewählten Datei
+
+Aus der Werkstatt gemeldet. Nach einem Mercedes wurde ein VW Caddy gewählt, und
+die Seite zeigte weiter die Mercedes-Aufteilung: 8.388.608 + 524.288 für eine
+Datei mit 9.256.960 Bytes. Das Packen wurde abgelehnt, mit
+„344.064 Bytes Unterschied zur Datei".
+
+Die Aufteilung gehört zu der Datei, für die sie gemacht wurde. Wird eine andere
+gewählt und passen die Zeilen nicht zu ihr, sind sie keine Warnung, sondern die
+falsche Antwort. Sie werden jetzt ersetzt, durch die gemerkte Aufteilung oder
+die Voreinstellung für die neue Größe. Wird dieselbe Datei noch einmal gewählt,
+bleiben von Hand angepasste Zeilen stehen.
+
+**Das Werkzeug antwortet in der Sprache des Fensters.** Die Meldungen aus dem
+Motor waren Englisch, auch wenn die App auf Deutsch lief. Die Größenmeldung
+lautet jetzt: „Die Teile ergeben zusammen 8.912.896 Bytes, die .bin hat
+9.256.960 Bytes. Passe die Größen an, bis beide gleich sind."
 
 ## Korrektur in 3.2.2: zwei Autos, eine Größe
 

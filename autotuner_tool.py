@@ -276,7 +276,7 @@ def zip_to_bin(zip_path: str, output_path: str) -> tuple[bool, str, list[dict]]:
             names = zf.namelist()
             bin_files = [n for n in names if n.lower().endswith('.bin')]
             if not bin_files:
-                return False, "No .bin files found in the archive.", []
+                return False, t("backup.msg.no_bins"), []
 
             bin_files.sort(key=part_sort_key)
 
@@ -293,13 +293,13 @@ def zip_to_bin(zip_path: str, output_path: str) -> tuple[bool, str, list[dict]]:
             with open(output_path, 'wb') as f:
                 f.write(combined)
 
-            return True, (f"Combined {len(bin_files)} part(s) → "
-                          f"{os.path.getsize(output_path):,} bytes"), parts_info
+            return True, t("backup.msg.combined", n=len(bin_files),
+                           bytes=f"{os.path.getsize(output_path):,}"), parts_info
 
     except zipfile.BadZipFile:
-        return False, "File is not a valid ZIP archive.", []
+        return False, t("backup.msg.not_zip"), []
     except Exception as e:
-        return False, f"Error: {e}", []
+        return False, t("backup.msg.failed", what=e), []
 
 
 def build_contents_ini(meta: dict = None) -> str:
@@ -366,11 +366,8 @@ def bin_to_zip(bin_path: str, output_path: str, parts_config: list[dict],
 
         total = sum(p['size'] for p in parts_config)
         if total != len(data):
-            return False, (
-                f"Size mismatch: parts total {total:,} bytes, "
-                f"but .bin is {len(data):,} bytes.\n"
-                "Please adjust the part sizes so they sum to the .bin file size."
-            )
+            return False, t("backup.msg.size_mismatch", total=f"{total:,}",
+                            actual=f"{len(data):,}")
 
         ini_content = build_contents_ini(ini_meta)
 
@@ -383,11 +380,11 @@ def bin_to_zip(bin_path: str, output_path: str, parts_config: list[dict],
             zf.writestr("contents.ini", ini_content)
             zf.writestr(HOW_TO_NAME, how_to_html or HOW_TO_USE_HTML)
 
-        return True, (f"Created {len(parts_config)} part(s) → "
-                      f"{os.path.getsize(output_path):,} bytes")
+        return True, t("backup.msg.created", n=len(parts_config),
+                       bytes=f"{os.path.getsize(output_path):,}")
 
     except Exception as e:
-        return False, f"Error: {e}"
+        return False, t("backup.msg.failed", what=e)
 
 
 def parse_ini(content: str) -> dict:
@@ -588,6 +585,9 @@ class BackupUI:
         self._b2z_total_var = tk.StringVar()
         self._meta_vars = {key: tk.StringVar() for key, _l, _p in META_FIELDS}
         self._traced = False
+        # Which .bin the split table belongs to, so re-picking the same file
+        # never throws away rows that were adjusted by hand.
+        self._last_bin = ""
 
     # ── the page ────────────────────────────────────────────────────────────
     def build_page(self):
@@ -1051,6 +1051,16 @@ class BackupUI:
             self._b2z_path.hint.configure(
                 text=f"{os.path.basename(path)} \u00b7 {size:,} {t('word.bytes')} "
                      f"({format_bytes(size)})", fg=ui.OK)
+            # A split belongs to the file it was made for. Picking a different
+            # file used to leave the old rows standing, so a Caddy was shown
+            # the Mercedes split and the archive was refused: two parts adding
+            # up to somebody else's file. Rows that do not fit the new file
+            # are not a warning, they are the wrong answer, so they go.
+            if path != self._last_bin and self._part_rows:
+                if sum(row.size for row in self._part_rows) != size:
+                    self._clear_part_rows()
+                    self._refresh_parts()
+            self._last_bin = path
             self._auto_layout(size)
         self._update_totals()
 

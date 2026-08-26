@@ -10,6 +10,7 @@ import zipfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import autotuner_tool as at  # noqa: E402
+import dme_text  # noqa: E402
 
 
 def make_backup_zip(path, parts, ini=None, order=None):
@@ -105,7 +106,7 @@ class TestZipToBin(unittest.TestCase):
             zf.writestr("contents.ini", "[Global]\r\n")
         ok, msg, info = at.zip_to_bin(zip_path, os.path.join(self.dir, "o.bin"))
         self.assertFalse(ok)
-        self.assertIn("No .bin files", msg)
+        self.assertEqual(msg, dme_text.t("backup.msg.no_bins"))
         self.assertEqual(info, [])
 
     def test_rejects_non_zip(self):
@@ -114,7 +115,7 @@ class TestZipToBin(unittest.TestCase):
             f.write(b"not a zip at all")
         ok, msg, _ = at.zip_to_bin(bogus, os.path.join(self.dir, "o.bin"))
         self.assertFalse(ok)
-        self.assertIn("not a valid ZIP", msg)
+        self.assertEqual(msg, dme_text.t("backup.msg.not_zip"))
 
 
 class TestBinToZip(unittest.TestCase):
@@ -158,7 +159,11 @@ class TestBinToZip(unittest.TestCase):
         bad[0] = {"name": "iflash0.bin", "size": 63}
         ok, msg = at.bin_to_zip(self.bin_path, os.path.join(self.dir, "o.zip"), bad)
         self.assertFalse(ok)
-        self.assertIn("Size mismatch", msg)
+        # Whatever language the window is in, this is the sentence for it.
+        total = sum(p["size"] for p in bad)
+        actual = os.path.getsize(self.bin_path)
+        self.assertEqual(msg, dme_text.t("backup.msg.size_mismatch",
+                                         total=f"{total:,}", actual=f"{actual:,}"))
         self.assertFalse(os.path.exists(os.path.join(self.dir, "o.zip")))
 
     def test_round_trip_is_byte_identical(self):
