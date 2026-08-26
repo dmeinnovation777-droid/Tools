@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-2.3.1.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-2.3.2.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -18,6 +18,16 @@ Dazu Startmenü-Einträge, auf Wunsch eine Desktop-Verknüpfung und ein Uninstal
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Neu in 2.3.2
+
+**Scheitert ein Lauf, steht das Protokoll jetzt offen da.** Vorher meldete die
+App „Nothing was locked. See the log" und das Protokoll war zugeklappt.
+
+Dazu ein Knopf **Save log** darin. Er schreibt die Ausgabe des MHD Tools in eine
+Datei, zusammen mit den verwendeten Pfaden, der VIN und der Version. Ein
+gescheiterter Lauf legt nämlich keine Protokolldatei neben eine Ausgabe, weil es
+keine Ausgabe gibt. Bisher blieb nur ein Foto vom Bildschirm.
 
 ## Korrektur in 2.3.1
 

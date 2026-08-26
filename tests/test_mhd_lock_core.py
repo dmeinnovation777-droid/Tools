@@ -955,5 +955,33 @@ class TestXdfLibrary(unittest.TestCase):
         self.assertTrue(any("Stopped checking" in note for note in found.notes))
 
 
+class TestTheLogIsReachableAfterAFailure(unittest.TestCase):
+    """A failed run leaves no .log next to an output, because there is none.
+
+    The banner says "see the log", so the log has to be in front of the user and
+    it has to be possible to hand it on. Otherwise the only way to report what
+    the builder said is a photograph of the screen, which is how this came up.
+    """
+
+    def test_the_banner_sends_you_to_the_log(self):
+        import inspect
+        source = inspect.getsource(m.MhdLockTool._on_event_done)
+        self.assertIn("See the log", source)
+        self.assertIn("self.details.expand()", source)
+
+    def test_saving_the_log_is_offered(self):
+        import inspect
+        page = inspect.getsource(m.MhdLockTool._build_lock_page)
+        self.assertIn("Save log", page)
+        self.assertTrue(callable(m.MhdLockTool._save_log))
+
+    def test_the_saved_log_names_what_was_run(self):
+        """Without the paths and the version a log cannot be acted on."""
+        import inspect
+        source = inspect.getsource(m.MhdLockTool._save_log)
+        for field in ("Tuned", "Stock", "XDF", "Tool key", "VIN", "Builder"):
+            self.assertIn(field, source)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

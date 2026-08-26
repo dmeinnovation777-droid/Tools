@@ -18,10 +18,10 @@ Bedienung und Aufbau stehen im [README](README.md).
 | Windows-Setup (Inno Setup) + CI-Build | fertig |
 | README, Build-Skripte | fertig |
 
-`python -m unittest discover -s tests` → 169 Tests, grün.
+`python -m unittest discover -s tests` → 172 Tests, grün.
 
 Produktname und Version stehen zentral in `dme_brand.py`
-(`SUITE = "DME Innovation Tools"`, `VERSION = "2.3.1"`); beide Werkzeuge, das
+(`SUITE = "DME Innovation Tools"`, `VERSION = "2.3.2"`); beide Werkzeuge, das
 Setup und der Dateiname der Setup-Datei ziehen daraus.
 
 ---

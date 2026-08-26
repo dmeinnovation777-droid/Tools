@@ -1427,6 +1427,8 @@ class MhdLockTool(_TkBase):
         self.log.pack(fill=tk.BOTH, expand=True)
         tools = tk.Frame(detail_card.body, bg=ui.CARD)
         tools.pack(fill=tk.X, pady=(10, 0))
+        ui.button(tools, "Save log", self._save_log, variant="secondary", size="sm",
+                  bg=ui.CARD).pack(side=tk.LEFT)
         ui.button(tools, "Clear", self.log.clear, variant="ghost", size="sm",
                   bg=ui.CARD).pack(side=tk.RIGHT)
         ui.button(tools, "Re-check  ⟳", lambda: self._resolve_and_check(force=True),
@@ -1979,6 +1981,44 @@ class MhdLockTool(_TkBase):
         self.lock_page.banner.show("busy", f"Locking {os.path.basename(job.tuned_bin)}…")
         self._start([job], target="lock")
 
+    def _save_log(self):
+        """Write the panel's text to a file, so a failed run can be handed on.
+
+        A failed lock leaves no .log next to an output, because there is no
+        output. Without this the only way to pass on what the builder said is a
+        photograph of the screen.
+        """
+        text = self.log.text.get("1.0", tk.END).rstrip()
+        if not text:
+            self.lock_page.banner.show("info", "The log is empty.")
+            return
+        job = self._current_job()
+        stem = safe_name(job.label, "mhd") or "mhd"
+        target = filedialog.asksaveasfilename(
+            title="Save the log", defaultextension=".log",
+            initialfile=f"{stem}_{datetime.datetime.now():%Y%m%d_%H%M}.log",
+            initialdir=job.output_dir or None,
+            filetypes=[("Log file", "*.log"), ("All files", "*.*")])
+        if not target:
+            return
+        try:
+            with open(target, "w", encoding="utf-8") as handle:
+                handle.write(f"{APP_NAME} v{APP_VERSION} · {brand.VENDOR}\n")
+                handle.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S}\n\n")
+                handle.write(f"Tuned    : {job.tuned_bin}\n")
+                handle.write(f"Stock    : {job.stock_bin}\n")
+                handle.write(f"XDF      : {job.xdf}\n")
+                handle.write(f"Tool key : {job.toolkey}\n")
+                handle.write(f"VIN      : {job.vin}\n")
+                handle.write(f"Builder  : {self.config_data.get('builder_exe', '')}\n\n")
+                handle.write(text + "\n")
+        except OSError as exc:
+            self.lock_page.banner.show("error", f"Could not write the log: {exc}")
+            return
+        self.lock_page.banner.show("ok", f"Log saved:\n{target}",
+                                   action_text="Show in folder",
+                                   action=lambda: ui.reveal_in_file_manager(target))
+
     def _on_stage_only(self):
         """Build the working folder without running anything, for a manual run."""
         job = self._current_job()
@@ -2222,6 +2262,10 @@ class MhdLockTool(_TkBase):
                 ui.reveal_in_file_manager(last)
         else:
             page.banner.show(tone, text)
+            # The message says "see the log", so put the log in front of them.
+            # Routine state stays folded away; a failed run is not routine.
+            if target != "batch" and hasattr(self, "details"):
+                self.details.expand()
         self.status.set(f"{successes} {done} · {failures} failed", tone)
         if target == "batch":
             self.var_batch_summary.set(f"{successes} {done} · {failures} failed · "
