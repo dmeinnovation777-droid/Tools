@@ -535,7 +535,16 @@ class BackupUI:
         self.app.shell.set_subtitle("backup", t(f"backup.sub.{self._direction}"))
 
     def _set_direction(self, key):
+        """Change direction, wherever the change came from.
+
+        Clicking the switch already moves it, so this is for every other way
+        in. Without it the switch could sit on one direction while the page
+        below showed the other, which is exactly the sort of thing nobody
+        notices until it matters.
+        """
         self._direction = key
+        if self.switch is not None and self.switch.active != key:
+            self.switch.select(key, notify=False)
         self._show_direction()
         self.on_shown()
 
