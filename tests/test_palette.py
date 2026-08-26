@@ -176,5 +176,44 @@ class TestTheFillAmberNeverSetsType(unittest.TestCase):
             self.assertIsNone(self.FOREGROUND.search(good), good)
 
 
+class TestNoDashesInWhatTheUserReads(unittest.TestCase):
+    """The house style has no em dashes. They are easy to type back in.
+
+    Checked on string literals only, so code, comments and real file names such
+    as how-to-use-backup.html are none of this test's business.
+    """
+
+    DASHES = "\u2014\u2013\u2012\u2015"
+
+    def offenders(self, path):
+        import ast
+        with open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        found = []
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and any(d in node.value for d in self.DASHES)):
+                found.append(f"{os.path.basename(path)}:{node.lineno}  {node.value[:60]!r}")
+        return found
+
+    def test_no_tool_writes_one(self):
+        offenders = []
+        for name in ("dme_ui.py", "dme_brand.py", "dme_suite.py",
+                     "mhd_lock_tool.py", "autotuner_tool.py"):
+            offenders += self.offenders(os.path.join(ROOT, name))
+        self.assertEqual(offenders, [], "use a comma, a full stop or a middle dot")
+
+    def test_the_check_would_catch_one(self):
+        import ast, tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False,
+                                         encoding="utf-8") as handle:
+            handle.write('x = "a \u2014 b"\n')
+            name = handle.name
+        try:
+            self.assertEqual(len(self.offenders(name)), 1)
+        finally:
+            os.unlink(name)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

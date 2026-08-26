@@ -6,7 +6,7 @@ A small, dependency-free widget set that gives the DME tools one consistent,
 modern look: flat dark surfaces, card-based layout, underline tabs, inline
 status banners and a single amber accent taken from the DME logo tile.
 
-Everything here is plain tkinter — no third-party packages, no images beyond
+Everything here is plain tkinter, no third party packages and no images beyond
 the embedded logo in dme_brand.py.
 """
 
@@ -19,22 +19,26 @@ from tkinter import font as tkfont
 # ─────────────────────────────────────────────────────────────────────────────
 # Palette
 # ─────────────────────────────────────────────────────────────────────────────
-BG = "#F5F5F7"          # working canvas
-SURFACE = "#FFFFFF"     # sidebar (must match dme_brand.HEADER_BG)
-CARD = "#FFFFFF"        # raised surface - it reads against BG, not by a border
-CARD_ALT = "#F5F5F7"    # nested rows, table headers
-HOVER = "#EFEFF2"       # hover fill
-BORDER = "#D2D2D7"      # hairline
-BORDER_SOFT = "#E5E5EA"
-FIELD = "#FFFFFF"       # input well
-FIELD_BORDER = "#C7C7CC"
+# Three greys stacked, the way a Mac window stacks them: the sidebar sits
+# deepest, the working canvas above it, the card on top. tk cannot draw a
+# shadow, so the card has to separate by fill alone - which is why the canvas
+# is not the near white of the drawing.
+SURFACE = "#EDEDF1"     # sidebar (must match dme_brand.HEADER_BG)
+BG = "#F4F4F6"          # working canvas
+CARD = "#FFFFFF"        # raised surface
+CARD_ALT = "#F7F7F9"    # nested rows, table headers, input wells
+HOVER = "#E9E9EE"       # hover fill
+BORDER = "#DCDCE1"      # hairline
+BORDER_SOFT = "#E8E8EC"
+FIELD = "#F7F7F9"       # input well, tinted so the card reads as the surface
+FIELD_BORDER = "#DCDCE1"
 
 # Three steps. All three clear 4.5:1 on every ground the app can put behind
 # them, HOVER included - the faint one carries hints, provenance and table rows,
 # so it is body copy and may not sit below AA anywhere.
 TEXT = "#1D1D1F"        # 16.8:1 on white
 TEXT_DIM = "#48484B"    #  8.6:1
-TEXT_FAINT = "#6A6A6F"  #  5.4:1 on white, 4.7:1 on the hover fill
+TEXT_FAINT = "#67676C"  #  5.5:1 on white, 4.7:1 on the hover fill
 
 # The amber fills, it does not set type: against white it is 1.9:1. Where the
 # brand colour has to be read, ACCENT_INK is the same hue taken down to AA.
@@ -42,7 +46,7 @@ ACCENT = "#FFAA00"
 ACCENT_HOVER = "#F0A000"
 ACCENT_PRESS = "#D99000"
 ON_ACCENT = "#1D1D1F"   # 8.8:1 on the amber fill
-ACCENT_INK = "#9A6300"  # 5.1:1 on white, 4.6:1 on CARD_ALT, 4.5:1 on WARN_BG
+ACCENT_INK = "#8F5C00"  # 5.6:1 on white, 4.7:1 on the hover fill
 
 # Every status pair clears 4.5:1 twice over: against white and against its own
 # tint, so a tone reads whether it sits on a card or inside a banner.
@@ -130,9 +134,10 @@ def init(root) -> None:
     mono = _pick(root, _MONO_CANDIDATES, "TkFixedFont")
     FONTS.update({
         "title":  (ui, 15, "bold"),
-        "h1":     (ui, 20, "bold"),   # the screen title carries the page
+        "h1":     (ui, 22, "bold"),   # the screen title carries the page
         "h1s":    (ui, 12, "bold"),
         "h2":     (ui, 11, "bold"),   # card titles
+        "section": (ui, 8, "bold"),   # the quiet header above a grouped list
         "body":   (ui, 10),
         "label":  (ui, 9),
         "small":  (ui, 9),
@@ -267,6 +272,112 @@ def wrap_to_parent(label, minimum=None, inset=None):
 
     parent.bind("<Configure>", resize, add="+")
     return label
+
+
+class Switch(tk.Canvas):
+    """A real switch, not a tick box.
+
+    tk's Checkbutton draws the platform's box, which on Windows is a 13 px
+    square from another decade. This is the same control the phone in your
+    pocket uses: a track, a knob, and the state readable across the room.
+    """
+
+    def __init__(self, parent, variable=None, command=None, bg=None):
+        # Not _w/_h: tkinter keeps the widget's Tcl path name in Misc._w.
+        self._track_w, self._track_h = px(38), px(22)
+        self._outer = bg or parent["bg"]
+        self._var = variable if variable is not None else tk.BooleanVar()
+        self._command = command
+        self._state = "normal"
+        super().__init__(parent, width=self._track_w, height=self._track_h, bg=self._outer,
+                         highlightthickness=0, bd=0, takefocus=1, cursor="hand2")
+        self.bind("<Button-1>", lambda _e: self.toggle())
+        self.bind("<Return>", lambda _e: self.toggle())
+        self.bind("<space>", lambda _e: self.toggle())
+        self.bind("<Configure>", lambda _e: self._draw())
+        self._trace = self._var.trace_add("write", lambda *_: self._draw())
+        self._draw()
+
+    def toggle(self):
+        if self._state == "disabled":
+            return
+        self._var.set(not self._var.get())
+        if self._command:
+            self._command()
+
+    def _draw(self):
+        self.delete("all")
+        w, h = self._track_w, self._track_h
+        on = bool(self._var.get())
+        if self._state == "disabled":
+            track, knob = CARD_ALT, BORDER_SOFT
+        else:
+            track, knob = (ACCENT if on else BORDER), "#FFFFFF"
+        r = h / 2
+        self.create_oval(0, 0, h, h, fill=track, outline=track)
+        self.create_oval(w - h, 0, w, h, fill=track, outline=track)
+        self.create_rectangle(r, 0, w - r, h, fill=track, outline=track)
+        pad = max(1, px(2))
+        d = h - 2 * pad
+        x = (w - pad - d) if on else pad
+        self.create_oval(x, pad, x + d, pad + d, fill=knob, outline=BORDER_SOFT)
+
+    def configure(self, cnf=None, **kw):
+        options = dict(cnf or {}, **kw)
+        if "state" in options:
+            self._state = options.pop("state")
+            self.configure(cursor="arrow" if self._state == "disabled" else "hand2")
+            self._draw()
+        if options:
+            super().configure(options)
+    config = configure
+
+
+class GroupedList(tk.Frame):
+    """A quiet header, then one white block of hairline separated rows.
+
+    This is the shape macOS settings use, and it beats a stack of labelled
+    fields for the same reason: the eye follows one edge down the page instead
+    of hunting for where each control begins.
+    """
+
+    def __init__(self, parent, label=None, bg=BG, radius=None):
+        super().__init__(parent, bg=bg)
+        if label:
+            tk.Label(self, text=label, bg=bg, fg=TEXT_FAINT, font=f("section"),
+                     anchor="w").pack(fill=tk.X, padx=px(4), pady=(0, px(6)))
+        self.body = tk.Frame(self, bg=CARD)
+        self.body.pack(fill=tk.BOTH, expand=True)
+        self._corners = round_corners(self.body, px(12) if radius is None else radius,
+                                      outer_bg=bg)
+        self._rows = 0
+
+    def row(self, pad=(14, 11)):
+        """One row. The separator above it appears for every row but the first."""
+        if self._rows:
+            tk.Frame(self.body, bg=BORDER_SOFT, height=1).pack(
+                fill=tk.X, padx=(px(pad[0]), 0))
+        holder = tk.Frame(self.body, bg=CARD)
+        holder.pack(fill=tk.X, padx=px(pad[0]), pady=px(pad[1]))
+        self._rows += 1
+        return holder
+
+    def switch_row(self, text, variable, hint=None, command=None):
+        holder = self.row()
+        line = tk.Frame(holder, bg=CARD)
+        line.pack(fill=tk.X)
+        copy = tk.Frame(line, bg=CARD)
+        copy.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Label(copy, text=text, bg=CARD, fg=TEXT, font=f("body"),
+                 anchor="w", justify="left").pack(fill=tk.X)
+        if hint:
+            note = tk.Label(copy, text=hint, bg=CARD, fg=TEXT_FAINT, font=f("small"),
+                            anchor="w", justify="left")
+            note.pack(fill=tk.X, pady=(px(2), 0))
+            wrap_to_parent(note, inset=px(60))
+        switch = Switch(line, variable=variable, command=command, bg=CARD)
+        switch.pack(side=tk.RIGHT, padx=(px(14), 0))
+        return switch
 
 
 def hr(parent, bg=BORDER, pady=0, padx=0):
@@ -550,7 +661,7 @@ class Card(tk.Frame):
 
 
 class TabBar(tk.Frame):
-    """Underline tab strip — the app's primary navigation."""
+    """Underline tab strip, the app's primary navigation."""
 
     def __init__(self, parent, tabs, command, bg=BG):
         super().__init__(parent, bg=bg)
@@ -590,7 +701,7 @@ class TabBar(tk.Frame):
 
 
 class Banner(tk.Frame):
-    """Inline result strip — replaces modal popups for routine feedback."""
+    """Inline result strip that replaces modal popups for routine feedback."""
 
     def __init__(self, parent, bg=BG):
         super().__init__(parent, bg=bg)
@@ -920,7 +1031,7 @@ class Page(tk.Frame):
 
 
 class Collapsible(tk.Frame):
-    """A disclosure section — everything that is only needed occasionally."""
+    """A disclosure section for everything that is only needed occasionally."""
 
     def __init__(self, parent, title, bg=BG, expanded=False, on_toggle=None):
         super().__init__(parent, bg=bg)
@@ -981,7 +1092,7 @@ class ResolvedRow(tk.Frame):
         self._icon.pack(side=tk.LEFT)
         tk.Label(self, text=label, bg=bg, fg=TEXT_DIM, font=f("small"), width=11,
                  anchor="w").pack(side=tk.LEFT)
-        self._value = tk.Label(self, text="—", bg=bg, fg=TEXT_FAINT, font=f("mono"),
+        self._value = tk.Label(self, text="not set", bg=bg, fg=TEXT_FAINT, font=f("mono"),
                                anchor="w")
         self._value.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._source = tk.Label(self, text="", bg=bg, fg=TEXT_FAINT, font=f("small"),
@@ -996,21 +1107,76 @@ class ResolvedRow(tk.Frame):
         self._source.configure(text=source)
 
 
-class _NavItem(tk.Frame):
-    """One sidebar entry. Selected is a quiet rounded fill, never a coloured bar."""
+def _draw_icon(canvas, name, colour, size):
+    """The five glyphs the sidebar needs, drawn on a canvas.
 
-    def __init__(self, parent, label, on_click, bg=SURFACE):
+    Stroke shapes on a 16 unit grid, scaled to `size`. No emoji and no icon
+    font: those either miss on a machine or arrive in the wrong weight.
+    """
+    canvas.delete("icon")
+    u = size / 16.0
+    w = max(1, round(1.6 * u))
+
+    def line(*points, cap="round"):
+        canvas.create_line(*[p * u for p in points], fill=colour, width=w,
+                           capstyle=cap, joinstyle="round", tags="icon")
+
+    def arc(x0, y0, x1, y1, start, extent):
+        canvas.create_arc(x0 * u, y0 * u, x1 * u, y1 * u, start=start, extent=extent,
+                          style="arc", outline=colour, width=w, tags="icon")
+
+    if name == "lock":
+        canvas.create_rectangle(3 * u, 7 * u, 13 * u, 14 * u, outline=colour,
+                                width=w, tags="icon")
+        arc(5, 2, 11, 9, 0, 180)
+    elif name == "batch":
+        line(2.5, 4.5, 13.5, 4.5)
+        line(2.5, 8, 13.5, 8)
+        line(2.5, 11.5, 9.5, 11.5)
+    elif name == "settings":
+        # Sliders, not a gear: a five unit cog fills in solid at this size.
+        line(2, 5.5, 13.5, 5.5)
+        line(2, 11, 13.5, 11)
+        for cx, cy in ((6, 5.5), (10, 11)):
+            r = 2.1 * u
+            canvas.create_oval(cx * u - r, cy * u - r, cx * u + r, cy * u + r,
+                               fill=canvas["bg"], outline=colour, width=w, tags="icon")
+    elif name in ("import", "export"):
+        line(2.5, 5, 6.5, 5); line(6.5, 5, 8, 6.8); line(8, 6.8, 13.5, 6.8)
+        canvas.create_rectangle(2.5 * u, 6.8 * u, 13.5 * u, 13.5 * u, outline=colour,
+                                width=w, tags="icon")
+        if name == "import":
+            line(8, 8.4, 8, 11.8); line(6.4, 10.2, 8, 11.8); line(9.6, 10.2, 8, 11.8)
+        else:
+            line(8, 11.8, 8, 8.4); line(6.4, 10, 8, 8.4); line(9.6, 10, 8, 8.4)
+
+
+class _NavItem(tk.Frame):
+    """One sidebar entry. Selected is a white card on the grey sidebar."""
+
+    def __init__(self, parent, label, on_click, bg=SURFACE, icon=None):
         super().__init__(parent, bg=bg)
         self._bg = bg
-        self._label = tk.Label(self, text=label, bg=bg, fg=TEXT_DIM, font=f("nav"),
-                               anchor="w", padx=px(14), pady=px(9), cursor="hand2")
-        self._label.pack(fill=tk.X)
-        for widget in (self, self._label):
+        self._icon_name = icon
+        self._size = px(16)
+        row = tk.Frame(self, bg=bg)
+        row.pack(fill=tk.X, padx=px(11), pady=px(8))
+        self._row = row
+        self._canvas = None
+        if icon:
+            self._canvas = tk.Canvas(row, width=self._size, height=self._size, bg=bg,
+                                     highlightthickness=0, bd=0, cursor="hand2")
+            self._canvas.pack(side=tk.LEFT, padx=(0, px(9)))
+        self._label = tk.Label(row, text=label, bg=bg, fg=TEXT_DIM, font=f("nav"),
+                               anchor="w", cursor="hand2")
+        self._label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        for widget in (self, row, self._label) + ((self._canvas,) if self._canvas else ()):
             widget.bind("<Button-1>", lambda _e: on_click())
             widget.bind("<Enter>", self._enter)
             widget.bind("<Leave>", self._leave)
         self._active = False
-        round_corners(self, px(8), outer_bg=bg)
+        self._corners = round_corners(self, px(8), outer_bg=bg)
+        self._paint(bg, TEXT_DIM)
 
     def _enter(self, _=None):
         if not self._active:
@@ -1022,14 +1188,21 @@ class _NavItem(tk.Frame):
 
     def _paint(self, bg, fg):
         self.configure(bg=bg)
+        self._row.configure(bg=bg)
         self._label.configure(bg=bg, fg=fg)
-        for child in self.winfo_children():
-            if isinstance(child, tk.Canvas):
-                child.itemconfigure("all", fill=bg, outline=bg)
+        # round_corners paints the canvas in the SURROUNDING colour and the arc
+        # in the widget's own. So the canvas keeps the sidebar grey and only the
+        # arc follows the fill; swapping the two turns the rounding into notches.
+        for corner in self._corners:
+            corner.configure(bg=self._bg)
+            corner.itemconfigure("all", fill=bg, outline=bg)
+        if self._canvas is not None:
+            self._canvas.configure(bg=bg)
+            _draw_icon(self._canvas, self._icon_name, fg, self._size)
 
     def set_active(self, active):
         self._active = active
-        self._paint(CARD_ALT if active else self._bg, TEXT if active else TEXT_DIM)
+        self._paint(CARD if active else self._bg, TEXT if active else TEXT_DIM)
 
 
 class Shell(tk.Frame):
@@ -1065,7 +1238,8 @@ class Shell(tk.Frame):
         items = tk.Frame(side, bg=SURFACE)
         items.pack(fill=tk.X, padx=px(12))
         for entry in nav:
-            item = _NavItem(items, entry["label"], lambda k=entry["key"]: self.select(k))
+            item = _NavItem(items, entry["label"], lambda k=entry["key"]: self.select(k),
+                            icon=entry.get("icon"))
             item.pack(fill=tk.X, pady=px(2))
             self._nav[entry["key"]] = item
 

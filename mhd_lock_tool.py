@@ -1,14 +1,14 @@
 """
-MHD Lock Tool — DME Innovation
+MHD Lock Tool · DME Innovation
 ==============================
 
-Automates the tune-locking workflow described in the MHD+ Tuning Guide
+Automates the tune locking workflow described in the MHD+ Tuning Guide
 ("Locking Tune Files with MHD+ Features"): it stages a clean working directory
 for the official MHD Map Encryption tool (TuningMapBuilder / XDF_Tools),
 validates every input before the run, drives the tool, reads its console
 output and files the resulting *.mhd away per customer.
 
-The locking itself is done by the tuner's own licensed copy of the MHD tool —
+The locking itself is done by the tuner's own licensed copy of the MHD tool,
 nothing here reimplements, patches or bypasses any part of it. The tool path is
 configured in the Settings tab; the executable is never bundled.
 
@@ -47,11 +47,11 @@ APP_VERSION = brand.VERSION
 APP_TAGLINE = "Automated MHD+ tune locking for the MHD Map Encryption tool"
 
 # Both pages say something different once the builder is left out of it.
-LOCK_SUBTITLE = ("Pick the customer's tuned file — stock ROM, XDF and tool key are "
-                 "found automatically, the VIN comes from the customer's mapswitch "
-                 "read. Check the VIN, press Lock. That is all.")
-PREPARE_SUBTITLE = ("Pick the customer's tuned file — stock ROM, XDF and tool key are "
-                    "found automatically, the VIN comes from the customer's mapswitch "
+LOCK_SUBTITLE = ("Pick the customer's tuned file. Stock ROM, XDF and tool key are "
+                 "found automatically, and the VIN comes from the customer's mapswitch "
+                 "read. Check the VIN, then press Lock.")
+PREPARE_SUBTITLE = ("Pick the customer's tuned file. Stock ROM, XDF and tool key are "
+                    "found automatically, and the VIN comes from the customer's mapswitch "
                     "read. You get the finished working folder; the .mhd is yours to make.")
 BATCH_SUBTITLE = ("Lock a whole queue in one go. Stock ROM and XDF are resolved per "
                   "file, and every job runs in its own clean folder.")
@@ -88,7 +88,7 @@ ERROR_MARKERS = (
     "Unhandled area", "Unhandled exception",
 )
 # The builder ends on Console.ReadKey(). With stdin redirected .NET raises
-# InvalidOperationException *after* the map has already been written — noise,
+# InvalidOperationException *after* the map has already been written, noise
 # not a failure.
 BENIGN_MARKERS = (
     "Cannot read keys",
@@ -119,7 +119,7 @@ LIBRARY_DEPTH = 6
 # known, XDFs are matched by name and no scan happens at all; this budget only
 # caps the fallback where nothing is known yet.
 CONTENT_SCAN_BUDGET = 250
-# The MHD app names a customer's backup read <VIN>_<program id>_mapswitch.bin —
+# The MHD app names a customer's backup read <VIN>_<program id>_mapswitch.bin,
 # the file the customer sends already carries VIN and program id. The trailer
 # tolerates download copies ("…_mapswitch (1).bin", "…_mapswitch - Kopie.bin").
 CUSTOMER_READ_RE = re.compile(
@@ -172,7 +172,7 @@ def validate_vin(vin: str) -> tuple[bool, str, str]:
     """Return (ok, normalised, message). The builder demands exactly 17 chars."""
     value = normalise_vin(vin)
     if not value:
-        return False, value, "VIN is required — the builder needs a <VIN>_vin.txt file."
+        return False, value, "VIN is required. The builder needs a <VIN>_vin.txt file."
     if len(value) != 17:
         return False, value, f"VIN length is {len(value)}, must be 17 characters."
     if not VIN_RE.match(value):
@@ -258,7 +258,7 @@ def parse_customer_read(path: str) -> tuple[str, str]:
     (VIN, program id) from a customer's MHD backup read, ("", "") otherwise.
 
     Customers send the read exactly as the MHD app saves it:
-    <VIN>_<program id>_mapswitch.bin. That name is the metadata — the VIN does
+    <VIN>_<program id>_mapswitch.bin. That name is the metadata, the VIN does
     not have to be typed and the file does not have to be renamed by hand.
     """
     stem = os.path.splitext(os.path.basename(path))[0]
@@ -367,7 +367,7 @@ def _newest(paths: list[str]) -> str:
 
 class _IdLookup:
     """
-    'Is this program id really in the image?' — asked once per id, not per file.
+    'Is this program id really in the image?' asked once per id, not per file.
 
     Each answer costs a scan of an 8 MB image, and a full MHD XDF library holds
     thousands of candidates. Caching keeps a re-check cheap; the budget keeps the
@@ -458,7 +458,7 @@ def resolve_inputs(tuned_path: str, library_dir: str = "", toolkey: str = "",
 
     # ── XDF ─────────────────────────────────────────────────────────────────
     # With the ROM number already established the whole MHD XDF library is
-    # matched by name — no further pass over the image, however big the library.
+    # matched by name, no further pass over the image, however big the library.
     xdf_candidates = _files_in(folders, lambda n: n.lower().endswith(XDF_EXT))
     xdf = ""
     if rom_id:
@@ -508,7 +508,7 @@ def resolve_inputs(tuned_path: str, library_dir: str = "", toolkey: str = "",
     # ── VIN ─────────────────────────────────────────────────────────────────
     # A VIN is only ever taken from a read that belongs to THIS job: it has to
     # sit next to the tuned file and carry this ROM's program id. A program id
-    # names a software version, not a car — an archived read from another
+    # names a software version, not a car, and an archived read from another
     # customer on the same version would otherwise lock the .mhd to their car.
     vins = set()
     for path in _files_in([own_folder], _is_customer_read):
@@ -553,7 +553,7 @@ class XdfRange:
 
 class XdfDefinition:
     """
-    Minimal TunerPro XDF reader — enough to know which byte ranges the
+    Minimal TunerPro XDF reader, enough to know which byte ranges the
     definition actually describes.
 
     The MHD builder refuses a file whose modifications are not covered by the
@@ -771,7 +771,7 @@ def _require_file(report: Preflight, path: str, label: str, extension=None) -> b
 
 
 def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
-    """Check everything the builder would choke on — before spending a run."""
+    """Check everything the builder would choke on, before spending a run."""
     report = Preflight()
 
     ok_vin, vin, message = validate_vin(job.vin)
@@ -795,7 +795,7 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
     # ignore the warning in the one case that matters.
     if has_tuned and _is_bare_customer_read(job.tuned_bin):
         report.add("warn", "The tuned .bin is named exactly like the customer's backup "
-                           "read — is this really the tune?")
+                           "read. Is this really the tune?")
     # Only a read filed with this job says anything about this car; one pulled
     # from the library belongs to whoever sent it.
     if has_stock and has_tuned and ok_vin and \
@@ -803,7 +803,7 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
             os.path.dirname(os.path.abspath(job.tuned_bin)):
         read_vin, _ = parse_customer_read(job.stock_bin)
         if read_vin and read_vin != vin:
-            report.add("warn", f"VIN differs from the customer's read ({read_vin}) — "
+            report.add("warn", f"VIN differs from the customer's read ({read_vin}). "
                                f"the .mhd will only flash on {vin}.")
         elif read_vin:
             report.add("info", "VIN matches the customer's read.")
@@ -823,7 +823,7 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
             report.regions = diff_regions(stock, tuned)
             report.changed_bytes = changed_byte_count(stock, tuned)
             if report.changed_bytes == 0:
-                report.add("error", "Stock and tuned .bin are identical — "
+                report.add("error", "Stock and tuned .bin are identical, "
                                     "the builder would report 'NO modifications found'.")
             else:
                 report.add("info", f"{report.changed_bytes:,} byte(s) changed in "
@@ -833,7 +833,7 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
         report.tuned_ids = detect_rom_ids(tuned)
         shared_ids = set(report.stock_ids) & set(report.tuned_ids)
         if report.stock_ids and report.tuned_ids and not shared_ids:
-            report.add("warn", "No common software id found in stock and tuned image — "
+            report.add("warn", "No common software id found in stock and tuned image. The "
                                "the builder may report a software version mismatch.")
 
     if has_xdf and definition is None:
@@ -849,7 +849,7 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
     if definition is not None:
         report.xdf_title = definition.title
         report.xdf_tables = definition.table_count
-        report.add("info", f"XDF '{definition.title}' — {definition.table_count} table(s).")
+        report.add("info", f"XDF '{definition.title}' · {definition.table_count} table(s).")
         if definition.rom_size and report.file_size and definition.rom_size != report.file_size:
             report.add("warn", f"XDF describes a {human_size(definition.rom_size)} ROM, "
                                f"the .bin is {human_size(report.file_size)}.")
@@ -864,7 +864,7 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
                 report.add("info",
                            f"{total:,} changed byte(s) in {len(report.uncovered)} region(s) "
                            f"are outside this XDF. The builder also carries its own table "
-                           f"definitions, so this is not necessarily a problem — but if it "
+                           f"definitions, so this is not necessarily a problem, but if it "
                            f"reports 'Modification not in xdf', these are the offsets.")
             else:
                 report.add("info", f"All modifications are covered by the XDF "
@@ -873,7 +873,7 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Staging — a clean directory the builder cannot misread
+# Staging, a clean directory the builder cannot misread
 # ─────────────────────────────────────────────────────────────────────────────
 def stock_staged_name(path: str) -> str:
     _vin, read_id = parse_customer_read(path)
@@ -1001,8 +1001,8 @@ def parse_builder_output(lines) -> RunResult:
     """
     Turn the builder's console chatter into a verdict.
 
-    The exit code is unreliable — the tool ends on a `Press a key…` prompt and
-    can fault there after a perfectly good run — so success is decided by the
+    The exit code is unreliable, the tool ends on a `Press a key…` prompt and
+    can fault there after a perfectly good run, so success is decided by the
     'Map correctly written' marker instead.
     """
     result = RunResult(lines=list(lines))
@@ -1029,7 +1029,7 @@ def run_builder(exe: str, workdir: str, extra_args=None, pass_workdir=False,
     """Run the MHD builder in `workdir` and stream its output line by line."""
     if not exe or not os.path.isfile(exe):
         result = RunResult()
-        result.launch_error = ("MHD map builder not configured — set the path to "
+        result.launch_error = ("MHD map builder not configured. Set the path to "
                                "TuningMapBuilder / MHD Map Encryption in Settings.")
         return result
 
@@ -1064,7 +1064,7 @@ def run_builder(exe: str, workdir: str, extra_args=None, pass_workdir=False,
     timer.daemon = True
     timer.start()
     try:
-        try:  # the builder ends on "Press a key…" — feed it one
+        try:  # the builder ends on "Press a key…", feed it one
             process.stdin.write("\r\n")
             process.stdin.flush()
         except OSError:
@@ -1229,7 +1229,7 @@ CSV_FIELDS = ("customer", "vin", "tuned_bin", "stock_bin", "xdf")
 
 
 def read_batch_csv(path: str, defaults: LockJob) -> tuple[list[LockJob], list[str]]:
-    """Read customer,vin,tuned_bin[,stock_bin][,xdf] — header optional."""
+    """Read customer,vin,tuned_bin[,stock_bin][,xdf], header optional."""
     jobs: list[LockJob] = []
     problems: list[str] = []
     base = os.path.dirname(os.path.abspath(path))
@@ -1274,7 +1274,7 @@ def read_batch_csv(path: str, defaults: LockJob) -> tuple[list[LockJob], list[st
             output_dir=defaults.output_dir,
         )
         if not job.tuned_bin:
-            problems.append(f"Row {number}: no tuned .bin given — skipped.")
+            problems.append(f"Row {number}: no tuned .bin given, skipped.")
             continue
         jobs.append(job)
     return jobs, problems
@@ -1301,7 +1301,7 @@ _TkBase = tk.Tk if TK_AVAILABLE else object
 class MhdLockTool(_TkBase):
     def __init__(self):
         super().__init__()
-        self.title(f"{APP_NAME} — {brand.VENDOR}")
+        self.title(f"{APP_NAME} · {brand.VENDOR}")
         self.configure(bg=ui.BG)
         ui.init(self)
         self.minsize(ui.px(960), ui.px(700))
@@ -1327,11 +1327,11 @@ class MhdLockTool(_TkBase):
     # ── Shell ────────────────────────────────────────────────────────────────
 
     NAV = [
-        {"key": "lock", "label": "Lock", "title": "Lock a tune",
+        {"key": "lock", "label": "Lock", "title": "Lock a tune", "icon": "lock",
          "subtitle": LOCK_SUBTITLE},
-        {"key": "batch", "label": "Batch", "title": "Batch",
+        {"key": "batch", "label": "Batch", "title": "Batch", "icon": "batch",
          "subtitle": BATCH_SUBTITLE},
-        {"key": "settings", "label": "Settings", "title": "Settings",
+        {"key": "settings", "label": "Settings", "title": "Settings", "icon": "settings",
          "subtitle": "Point the tool at your own licensed MHD map builder and your key. "
                      "Set once, used for every job."},
     ]
@@ -1431,7 +1431,7 @@ class MhdLockTool(_TkBase):
                   bg=ui.CARD).pack(side=tk.RIGHT)
         ui.button(tools, "Re-check  ⟳", lambda: self._resolve_and_check(force=True),
                   variant="ghost", size="sm", bg=ui.CARD).pack(side=tk.RIGHT, padx=(0, 8))
-        self.log.set_text("Pick a tuned file — the checks start on their own.", "dim")
+        self.log.set_text("Pick a tuned file. The checks start on their own.", "dim")
 
         self.var_summary = tk.StringVar(value="Waiting for a tuned file")
         page.summary(self.var_summary)
@@ -1551,7 +1551,7 @@ class MhdLockTool(_TkBase):
         missing = [k for k in ("stock", "xdf", "toolkey")
                    if not getattr(self, f"var_{k}").get().strip()]
         if missing:
-            self.manual.set_title(f"Change manually — {len(missing)} file(s) not found")
+            self.manual.set_title(f"Change manually · {len(missing)} file(s) not found")
         else:
             self.manual.set_title("Change manually")
         for note in found.notes:
@@ -1564,7 +1564,7 @@ class MhdLockTool(_TkBase):
         problems = missing_setup(self.config_data, self.var_toolkey.get())
         if problems:
             self.setup_msg.config(text="Still missing: " + " and ".join(problems) +
-                                       ". Set it once under Settings — after that every "
+                                       ". Set it once under Settings. After that every "
                                        "job needs nothing but the tuned file and the VIN.")
             if not self.setup_card.winfo_ismapped():
                 self.setup_card.pack(fill=tk.X, pady=(0, 14), before=self._step1)
@@ -1592,7 +1592,7 @@ class MhdLockTool(_TkBase):
                             fg=ui.OK if ok_vin else (ui.TEXT_FAINT if not job.vin else ui.ERR))
         if not (job.stock_bin and job.tuned_bin and os.path.isfile(job.stock_bin)
                 and os.path.isfile(job.tuned_bin)):
-            self.var_summary.set("Stock ROM not found — pick it under Details")
+            self.var_summary.set("Stock ROM not found. Pick it under Details")
             return None
         report = preflight(job, self._definition(job.xdf))
         self._render_preflight(report, job)
@@ -1613,7 +1613,7 @@ class MhdLockTool(_TkBase):
             self.log.write("─" * 62, "dim")
             for start, length in report.regions[:25]:
                 names = definition.tables_at(start, length, report.file_size) if definition else []
-                label = ", ".join(names[:2]) if names else "— not in this XDF —"
+                label = ", ".join(names[:2]) if names else "not in this XDF"
                 self.log.write(f"  0x{start:07X}  {length:>6,} B   {label[:64]}",
                                "accent" if names else "warn")
             if len(report.regions) > 25:
@@ -1636,7 +1636,7 @@ class MhdLockTool(_TkBase):
                             if self.config_data.get("prepare_only", False)
                             else "Ready to lock", "ok")
         else:
-            self.details.set_title(f"Details and builder log — {len(report.errors)} problem(s)")
+            self.details.set_title(f"Details and builder log · {len(report.errors)} problem(s)")
             self.var_summary.set(report.errors[0].text if report.errors else "Checks failed")
             self.status.set("Check failed", "error")
         return report
@@ -1713,78 +1713,86 @@ class MhdLockTool(_TkBase):
     def _build_settings_page(self):
         page = ui.Page(self._host)
 
-        builder = page.card("MHD map builder")
+        def group(label):
+            block = ui.GroupedList(page.body, label)
+            block.pack(fill=tk.X, pady=(0, 18))
+            return block
+
+        builder = group("MHD MAP BUILDER")
         self.var_exe = tk.StringVar()
-        ui.PathRow(builder.body, "Path to the builder executable", self.var_exe,
+        ui.PathRow(builder.row(), "Path to the builder executable", self.var_exe,
                    lambda: self._pick_file(self.var_exe, "Select the MHD map builder",
                                            [("Programs", "*.exe"), ("All files", "*.*")]),
-                   ).pack(fill=tk.X, pady=(0, 12))
-        opts = tk.Frame(builder.body, bg=ui.CARD)
-        opts.pack(fill=tk.X)
+                   ).pack(fill=tk.X)
+        opts = builder.row()
         self.var_args = tk.StringVar()
-        ui.LabeledEntry(opts, "Extra command line arguments (usually empty)",
+        ui.LabeledEntry(opts, "Extra command line arguments, usually empty",
                         self.var_args).grid(row=0, column=0, sticky="ew", padx=(0, 14))
         self.var_timeout = tk.StringVar()
-        ui.LabeledEntry(opts, "Timeout per job (seconds)", self.var_timeout,
+        ui.LabeledEntry(opts, "Timeout per job, seconds", self.var_timeout,
                         width=10).grid(row=0, column=1, sticky="ew")
         opts.grid_columnconfigure(0, weight=3)
         opts.grid_columnconfigure(1, weight=1)
         self.var_copy_builder = tk.BooleanVar()
         self.var_pass_workdir = tk.BooleanVar()
         self.var_prepare_only = tk.BooleanVar()
-        self._checkbox(builder.body, "Copy the builder into the working folder",
-                       self.var_copy_builder,
-                       "Mirrors a hand-built folder — the builder always sees the right "
-                       "files, and it is the copy that runs when this app runs it.")
-        self._checkbox(builder.body, "Pass the working folder as a command line argument",
-                       self.var_pass_workdir,
-                       "Only needed if your build of the tool expects a path argument.")
-        ui.hr(builder.body, bg=ui.BORDER_SOFT, pady=(10, 10))
-        self._checkbox(builder.body, "I convert to .mhd myself — only prepare the folder",
-                       self.var_prepare_only,
-                       "Preparing the folder becomes the main action and the builder is "
-                       "never started. Its path stays useful: it puts the .exe into the "
-                       "folder so you can run it there.")
+        builder.switch_row("Copy the builder into the working folder",
+                           self.var_copy_builder,
+                           "Mirrors a folder you built by hand, so the builder always sees "
+                           "the right files, and it is the copy that runs when this app "
+                           "runs it.", command=self._save_settings)
+        builder.switch_row("Pass the working folder as a command line argument",
+                           self.var_pass_workdir,
+                           "Only needed if your build of the tool expects a path argument.",
+                           command=self._save_settings)
+        builder.switch_row("I convert to .mhd myself, only prepare the folder",
+                           self.var_prepare_only,
+                           "Preparing the folder becomes the main action and the builder is "
+                           "never started. Its path stays useful: it puts the .exe into the "
+                           "folder so you can run it there.", command=self._save_settings)
 
-        yours = page.card("Your files", hint="set once, used for every job")
+        yours = group("YOUR FILES, SET ONCE AND USED FOR EVERY JOB")
         self.var_cfg_toolkey = tk.StringVar()
-        ui.PathRow(yours.body, "MHD tool key (.toolkey)", self.var_cfg_toolkey,
+        ui.PathRow(yours.row(), "MHD tool key (.toolkey)", self.var_cfg_toolkey,
                    lambda: self._pick_file(self.var_cfg_toolkey, "Select your .toolkey",
                                            [("MHD tool key", "*.toolkey"),
                                             ("All files", "*.*")]),
-                   hint="Stays on this machine — only copied into the temporary "
-                        "working folder").pack(fill=tk.X, pady=(0, 12))
+                   hint="Stays on this machine. Only copied into the temporary "
+                        "working folder.").pack(fill=tk.X)
         self.var_library = tk.StringVar()
-        ui.PathRow(yours.body, "Folder with your XDFs and stock ROMs (optional)",
+        ui.PathRow(yours.row(), "Folder with your XDFs and stock ROMs, optional",
                    self.var_library,
                    lambda: self._pick_dir(self.var_library, "Select the folder"),
-                   browse_text="Choose…",
+                   browse_text="Choose",
                    hint="Only needed when stock ROM and XDF are not stored next to the "
                         "tuned file. Subfolders are searched, matched by ROM id."
                    ).pack(fill=tk.X)
 
-        output = page.card("Output")
+        output = group("OUTPUT")
         self.var_cfg_outdir = tk.StringVar()
-        ui.PathRow(output.body, "Default output folder", self.var_cfg_outdir,
+        ui.PathRow(output.row(), "Default output folder", self.var_cfg_outdir,
                    lambda: self._pick_dir(self.var_cfg_outdir, "Select the default output folder"),
-                   browse_text="Choose…").pack(fill=tk.X, pady=(0, 12))
+                   browse_text="Choose").pack(fill=tk.X)
+        holder = output.row()
         self.var_template = tk.StringVar()
-        ui.LabeledEntry(output.body, "File name template", self.var_template).pack(fill=tk.X)
-        tk.Label(output.body, text=f"Tokens: {NAME_TOKENS}   ·   "
-                                   "{source} keeps the name the builder produced",
-                 bg=ui.CARD, fg=ui.TEXT_FAINT, font=ui.f("small"),
-                 anchor="w").pack(fill=tk.X, pady=(6, 10))
+        ui.LabeledEntry(holder, "File name template", self.var_template).pack(fill=tk.X)
+        tokens = tk.Label(holder, text=f"Tokens: {NAME_TOKENS}   ·   "
+                                       "{source} keeps the name the builder produced",
+                          bg=ui.CARD, fg=ui.TEXT_FAINT, font=ui.f("small"),
+                          anchor="w", justify="left")
+        tokens.pack(fill=tk.X, pady=(6, 0))
+        ui.wrap_to_parent(tokens)
         self.var_open_after = tk.BooleanVar()
-        self._checkbox(output.body, "Open the output folder after a successful lock",
-                       self.var_open_after)
+        output.switch_row("Open the output folder after a successful lock",
+                          self.var_open_after, command=self._save_settings)
 
-        advanced = page.card("Advanced")
+        advanced = group("ADVANCED")
         self.var_keep_staging = tk.BooleanVar()
-        self._checkbox(advanced.body, "Keep the temporary working folder after the run",
-                       self.var_keep_staging,
-                       "Useful when you want to inspect exactly what the builder saw.")
-        actions = tk.Frame(advanced.body, bg=ui.CARD)
-        actions.pack(fill=tk.X, pady=(10, 0))
+        advanced.switch_row("Keep the temporary working folder after the run",
+                            self.var_keep_staging,
+                            "Useful when you want to inspect exactly what the builder saw.",
+                            command=self._save_settings)
+        actions = advanced.row()
         ui.button(actions, "Open settings file location",
                   lambda: ui.reveal_in_file_manager(config_path()),
                   variant="ghost", size="sm", bg=ui.CARD).pack(side=tk.LEFT)
@@ -1960,7 +1968,7 @@ class MhdLockTool(_TkBase):
         report = preflight(job, self._definition(job.xdf))
         self._render_preflight(report, job)
         if not report.ok:
-            self.lock_page.banner.show("error", "Pre-flight failed — fix the points above first.")
+            self.lock_page.banner.show("error", "Pre-flight failed. Fix the points above first.")
             return
         exe = self.config_data.get("builder_exe", "")
         if not exe or not os.path.isfile(exe):
@@ -1972,12 +1980,12 @@ class MhdLockTool(_TkBase):
         self._start([job], target="lock")
 
     def _on_stage_only(self):
-        """Build the working folder without running anything — for a manual run."""
+        """Build the working folder without running anything, for a manual run."""
         job = self._current_job()
         report = preflight(job, self._definition(job.xdf))
         self._render_preflight(report, job)
         if not report.ok:
-            self.lock_page.banner.show("error", "Pre-flight failed — fix the points above first.")
+            self.lock_page.banner.show("error", "Pre-flight failed. Fix the points above first.")
             return
         try:
             manifest = prepare_folder(job, self.config_data)
@@ -1992,7 +2000,7 @@ class MhdLockTool(_TkBase):
         if manifest["builder"]:
             self.log.write(f"    {os.path.basename(manifest['builder'])}", "dim")
         else:
-            self.log.write("    (no map builder in the folder — set its path under "
+            self.log.write("    (no map builder in the folder. Set its path under "
                            "Settings to have it copied in)", "warn")
         self.lock_page.banner.show("ok", f"Working folder ready:\n{workdir}",
                                    action_text="Show in folder",
@@ -2137,7 +2145,7 @@ class MhdLockTool(_TkBase):
                 log_path = os.path.splitext(finals[0])[0] + ".log"
                 try:
                     with open(log_path, "w", encoding="utf-8") as handle:
-                        handle.write(f"{APP_NAME} v{APP_VERSION} — {brand.VENDOR}\n")
+                        handle.write(f"{APP_NAME} v{APP_VERSION} · {brand.VENDOR}\n")
                         handle.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S}\n\n")
                         handle.write(f"Customer : {job.customer}\nVIN      : {job.vin}\n")
                         handle.write(f"Stock    : {job.stock_bin}\nTuned    : {job.tuned_bin}\n")
@@ -2202,9 +2210,9 @@ class MhdLockTool(_TkBase):
                                 if total > 1 else
                                 ("Folder prepared." if prepared else "Locked successfully."))
         elif successes:
-            tone, text = "warn", f"{successes} {done}, {failures} failed — see the log."
+            tone, text = "warn", f"{successes} {done}, {failures} failed. See the log."
         else:
-            tone, text = "error", f"Nothing was {done} — see the log."
+            tone, text = "error", f"Nothing was {done}. See the log."
         last = getattr(self, "_last_output", "")
         if tone == "ok" and last:
             text = f"{text}\n{last}"
@@ -2304,7 +2312,7 @@ class MhdLockTool(_TkBase):
 
     def _batch_export(self):
         if not self.batch_jobs:
-            self.batch_page.banner.show("error", "Nothing to export — the queue is empty.")
+            self.batch_page.banner.show("error", "Nothing to export. The queue is empty.")
             return
         path = filedialog.asksaveasfilename(title="Export batch report", defaultextension=".csv",
                                             filetypes=[("CSV", "*.csv")])
@@ -2370,7 +2378,7 @@ class MhdLockTool(_TkBase):
 
 def main() -> int:
     if not TK_AVAILABLE:
-        print(f"{APP_NAME} v{APP_VERSION} — {brand.VENDOR}", file=sys.stderr)
+        print(f"{APP_NAME} v{APP_VERSION} · {brand.VENDOR}", file=sys.stderr)
         print("tkinter is not available in this Python installation.", file=sys.stderr)
         print("Windows/macOS: reinstall Python and tick 'tcl/tk and IDLE'.", file=sys.stderr)
         print("Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)

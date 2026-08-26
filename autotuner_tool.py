@@ -1,5 +1,5 @@
 """
-AutoTuner Backup Tool — DME Innovation
+AutoTuner Backup Tool · DME Innovation
 ======================================
 
 Concentrates AutoTuner .zip/.bak ECU backups into a single .bin file and splits
@@ -246,7 +246,7 @@ def bin_to_zip(bin_path: str, output_path: str, parts_config: list[dict],
                ini_meta: dict = None, how_to_html: str = "") -> tuple[bool, str]:
     """
     Split a .bin file into named parts per parts_config and pack into an AutoTuner .zip.
-    parts_config = [{'name': str, 'size': int}, ...]  — sizes must sum to bin file size.
+    parts_config = [{'name': str, 'size': int}, ...], sizes must sum to bin file size.
 
     `how_to_html` is the source archive's own how-to-use-backup.html. Pass it and
     it is carried across unchanged; the built-in English page is only the
@@ -419,7 +419,7 @@ class PartRow:
 class AutoTunerTool(_TkBase):
     def __init__(self):
         super().__init__()
-        self.title(f"{APP_NAME} — {brand.VENDOR}")
+        self.title(f"{APP_NAME} · {brand.VENDOR}")
         self.configure(bg=ui.BG)
         ui.init(self)
         self.minsize(ui.px(900), ui.px(680))
@@ -435,12 +435,12 @@ class AutoTunerTool(_TkBase):
     # ── Shell ────────────────────────────────────────────────────────────────
 
     NAV = [
-        {"key": "z2b", "label": "ZIP → BIN", "title": "ZIP → BIN",
-         "subtitle": "Concentrate every memory part of an AutoTuner .zip/.bak backup "
+        {"key": "z2b", "label": "ZIP → BIN", "title": "ZIP → BIN", "icon": "import",
+         "subtitle": "Concentrate every memory part of an AutoTuner .zip or .bak backup "
                      "into one continuous .bin for your tuning software."},
-        {"key": "b2z", "label": "BIN → ZIP", "title": "BIN → ZIP",
+        {"key": "b2z", "label": "BIN → ZIP", "title": "BIN → ZIP", "icon": "export",
          "subtitle": "Split a modified .bin back into its memory parts and package them "
-                     "as an AutoTuner-compatible .zip backup."},
+                     "as an AutoTuner compatible .zip backup."},
     ]
 
     def _build(self):
@@ -483,11 +483,11 @@ class AutoTunerTool(_TkBase):
         self._z2b_zip_var = tk.StringVar()
         self._z2b_path = ui.PathRow(src.body, "AutoTuner backup (.zip / .bak)",
                                     self._z2b_zip_var, self._browse_zip,
-                                    hint="No file selected — Ctrl+O to browse")
+                                    hint="No file selected. Ctrl+O to browse")
         self._z2b_path.pack(fill=tk.X)
         self._z2b_zip_var.trace_add('write', lambda *_: self._on_zip_path_changed())
 
-        self._z2b_preview_card = page.card("Archive contents", hint="—")
+        self._z2b_preview_card = page.card("Archive contents", hint="nothing loaded")
         self._z2b_log = ui.LogView(self._z2b_preview_card.body, height=13)
         self._z2b_log.pack(fill=tk.BOTH, expand=True)
         tools = tk.Frame(self._z2b_preview_card.body, bg=ui.CARD)
@@ -521,7 +521,7 @@ class AutoTunerTool(_TkBase):
     def _on_zip_path_changed(self):
         path = self._z2b_zip_var.get().strip()
         if not path:
-            self._z2b_path.set_hint("No file selected — Ctrl+O to browse")
+            self._z2b_path.set_hint("No file selected. Ctrl+O to browse")
         elif not os.path.exists(path):
             self._z2b_path.set_hint("File not found", "error")
         else:
@@ -548,8 +548,8 @@ class AutoTunerTool(_TkBase):
         if not zip_path or not os.path.exists(zip_path):
             self._archive_info = None
             self._z2b_log.set_text("Select a .zip or .bak backup to inspect its parts.", "dim")
-            self._z2b_preview_card.set_hint("—")
-            self._z2b_path.set_hint("No file selected — Ctrl+O to browse")
+            self._z2b_preview_card.set_hint("nothing loaded")
+            self._z2b_path.set_hint("No file selected. Ctrl+O to browse")
             self._z2b_summary.set("Waiting for a backup file")
             return
         try:
@@ -644,7 +644,7 @@ class AutoTunerTool(_TkBase):
         self._b2z_bin_var = tk.StringVar()
         self._b2z_path = ui.PathRow(src.body, "Modified binary (.bin)", self._b2z_bin_var,
                                     self._browse_bin,
-                                    hint="No file selected — Ctrl+O to browse")
+                                    hint="No file selected. Ctrl+O to browse")
         self._b2z_path.pack(fill=tk.X)
         self._b2z_bin_var.trace_add('write', lambda *_: self._on_bin_path_changed())
 
@@ -681,7 +681,7 @@ class AutoTunerTool(_TkBase):
             self._parts_table.grid_columnconfigure(col, weight=weight)
         self._parts_empty = tk.Label(
             self._parts_table,
-            text="No parts configured — load a template, pick a preset, or add rows.",
+            text="No parts configured. Load a template, pick a preset, or add rows.",
             bg=ui.CARD, fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w", pady=14)
 
         self._split_canvas = tk.Canvas(split.body, bg=ui.CARD, height=10,
@@ -698,7 +698,7 @@ class AutoTunerTool(_TkBase):
         self._b2z_match.pack(side=tk.RIGHT)
 
         meta_card = page.card("Vehicle / ECU metadata",
-                              hint="optional — written to contents.ini")
+                              hint="optional, written to contents.ini")
         grid = tk.Frame(meta_card.body, bg=ui.CARD)
         grid.pack(fill=tk.X)
         self._meta_vars = {}
@@ -754,7 +754,7 @@ class AutoTunerTool(_TkBase):
                 self._empty_hint(size)
             else:
                 self._parts_empty.config(
-                    text="No parts configured — load a template, pick a preset, "
+                    text="No parts configured. Load a template, pick a preset, "
                          "or add rows.")
             self._parts_empty.grid(row=0, column=0, columnspan=6, sticky="ew")
         self._split_card.set_hint(f"{len(self._part_rows)} part(s)")
@@ -807,7 +807,7 @@ class AutoTunerTool(_TkBase):
     def _on_bin_path_changed(self):
         path = self._b2z_bin_var.get().strip()
         if not path:
-            self._b2z_path.set_hint("No file selected — Ctrl+O to browse")
+            self._b2z_path.set_hint("No file selected. Ctrl+O to browse")
         elif not os.path.exists(path):
             self._b2z_path.set_hint("File not found", "error")
         else:
@@ -828,7 +828,7 @@ class AutoTunerTool(_TkBase):
                 self._add_part_row(name=part["name"], size=part["size"])
             self._refresh_parts()
             origin = f" from {label}" if label else ""
-            self._b2z_banner.show("ok", f"Layout restored{origin} — {len(parts)} part(s), "
+            self._b2z_banner.show("ok", f"Layout restored{origin} · {len(parts)} part(s), "
                                         f"sizes match.")
             self.status.set(f"Layout restored · {len(parts)} part(s)", "ok")
             return
@@ -840,18 +840,18 @@ class AutoTunerTool(_TkBase):
                 # customer's contents.ini, so do not let it be a silent guess.
                 others = ", ".join(candidates[1:])
                 self._b2z_banner.show(
-                    "warn", f"This size fits {' and '.join(candidates)} — the split is "
+                    "warn", f"This size fits {' and '.join(candidates)}. The split is "
                             f"the same, {candidates[0]} was filled in. Check the ECU "
                             f"field if this is a {others}.")
             else:
                 self._b2z_banner.show("info", f"File size matches the {candidates[0]} "
-                                              f"layout — preset applied.")
+                                              f"layout, preset applied.")
             return
         self._empty_hint(size)
 
     def _empty_hint(self, size: int):
         self._parts_empty.config(
-            text=f"{size:,} bytes match no preset — open the original AutoTuner backup "
+            text=f"{size:,} bytes match no preset. Open the original AutoTuner backup "
                  f"with “Load from ZIP template”, then this layout is remembered.")
 
     def _browse_bin(self):
@@ -917,7 +917,7 @@ class AutoTunerTool(_TkBase):
             self._b2z_banner.show("error", "Choose where the .zip backup should be saved.")
             return
         if not self._part_rows:
-            self._b2z_banner.show("error", "Add at least one part — use a preset or a ZIP template.")
+            self._b2z_banner.show("error", "Add at least one part. Use a preset or a ZIP template.")
             return
 
         parts_config = []
@@ -964,7 +964,7 @@ class AutoTunerTool(_TkBase):
 
 def main() -> int:
     if not TK_AVAILABLE:
-        print(f"{APP_NAME} v{APP_VERSION} — {brand.VENDOR}", file=sys.stderr)
+        print(f"{APP_NAME} v{APP_VERSION} · {brand.VENDOR}", file=sys.stderr)
         print("tkinter is not available in this Python installation.", file=sys.stderr)
         print("Windows/macOS: reinstall Python and tick 'tcl/tk and IDLE'.", file=sys.stderr)
         print("Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)

@@ -287,7 +287,7 @@ class TestPreflight(unittest.TestCase):
                      b"\x01" * 0x1000)
         self.job.tuned_bin = read
         report = m.preflight(self.job)
-        self.assertTrue(any("is this really the tune" in i.text
+        self.assertTrue(any("really the tune" in i.text
                             for i in report.warnings))
 
     def test_a_tune_named_after_the_read_is_not_flagged(self):

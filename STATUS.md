@@ -11,17 +11,17 @@ Bedienung und Aufbau stehen im [README](README.md).
 | Teil | Status |
 | --- | --- |
 | Branding-Pipeline aus dem Vektor-Logo | fertig |
-| Gemeinsames Design-System `dme_ui.py` | fertig, heller Look |
+| Gemeinsames Design-System `dme_ui.py` | fertig, heller Look mit Schaltern |
 | AutoTuner Backup Tool | fertig, 36 Unit-Tests + GUI-Smoke-Test |
 | MHD Lock Tool | fertig, 84 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
 | Starter `dme_suite.py` | fertig, 17 Unit-Tests + GUI-Smoke-Test |
 | Windows-Setup (Inno Setup) + CI-Build | fertig |
 | README, Build-Skripte | fertig |
 
-`python -m unittest discover -s tests` → 165 Tests, grün.
+`python -m unittest discover -s tests` → 167 Tests, grün.
 
 Produktname und Version stehen zentral in `dme_brand.py`
-(`SUITE = "DME Innovation Tools"`, `VERSION = "2.2.0"`); beide Werkzeuge, das
+(`SUITE = "DME Innovation Tools"`, `VERSION = "2.3.0"`); beide Werkzeuge, das
 Setup und der Dateiname der Setup-Datei ziehen daraus.
 
 ---
@@ -316,6 +316,19 @@ Eine Installationsdatei für den PC:
 
 * **Oberfläche auf Englisch**, Dokumentation auf Deutsch — die Terminologie
   (iflash/dflash, toolkey, XDF, map slot) ist ohnehin englisch. Umstellbar.
+* **Drei Grautöne statt zwei** (seit 2.3.0). Seitenleiste `#EDEDF1`,
+  Arbeitsfläche `#F4F4F6`, Karte weiß. Der Entwurf sah eine fast weiße
+  Arbeitsfläche vor; das trägt nur mit einem Schatten, und den kann tkinter
+  nicht zeichnen, also muss die Karte sich durch die Fläche abheben. Dazu
+  `Switch` und `GroupedList` in `dme_ui.py`, gezeichnete Symbole in der
+  Navigation, und `HEADER_BG` auf die neue Seitenleistenfarbe.
+  Zwei Fallen dabei: `Misc._w` ist in tkinter der Tcl-Pfad des Widgets und darf
+  nicht überschrieben werden, und `round_corners` malt die Leinwand in der
+  **Umgebungs**farbe und den Bogen in der eigenen; wer das vertauscht, macht aus
+  der Rundung eine Kerbe.
+* **Keine Gedankenstriche in Beschriftungen** (seit 2.3.0), auf Wunsch des
+  Kunden. Rund siebzig Stellen umformuliert; `test_palette.py` prüft es über
+  den AST, also nur Zeichenketten, nicht Kommentare und nicht Dateinamen.
 * **Heller Grund, weiße Karten, eine Akzentfarbe.** Der dunkle Look bis
   einschließlich 1.4.1 steht in der Git-Historie; eine Umschaltmöglichkeit
   wäre ein eigenes Vorhaben, weil alle Widgets die Farben beim Import lesen.

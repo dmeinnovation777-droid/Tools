@@ -40,7 +40,7 @@ BRAND_PY = ROOT / "dme_brand.py"
 # Brand / UI colours (must match dme_ui.SURFACE / dme_ui.ACCENT)
 AMBER = (255, 170, 0)
 BLACK = (10, 10, 10)
-HEADER_BG = (255, 255, 255)      # dme_ui.SURFACE / dme_brand.HEADER_BG
+HEADER_BG = (237, 237, 241)      # dme_ui.SURFACE / dme_brand.HEADER_BG
 INK = (29, 29, 31)            # dme_ui.TEXT - the wordmark on a light header
 
 # Icon sizes baked into the multi-resolution .ico

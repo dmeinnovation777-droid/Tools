@@ -1,5 +1,5 @@
 """
-DME Innovation Tools — suite launcher
+DME Innovation Tools · suite launcher
 =====================================
 
 The single entry point installed on the PC: it lists the tools of the suite and
@@ -38,7 +38,7 @@ TOOLS = [
         "name": "AutoTuner Backup Tool",
         "module": "autotuner_tool",
         "script": "autotuner_tool.py",
-        "pitch": "Turn AutoTuner ECU backups into one continuous binary — and back.",
+        "pitch": "Turn AutoTuner ECU backups into one continuous binary, and back.",
         "bullets": [
             "ZIP / BAK → BIN with the exact part order and offsets",
             "BIN → ZIP with presets, templates and a live size check",

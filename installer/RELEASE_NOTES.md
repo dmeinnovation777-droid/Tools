@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-2.2.0.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-2.3.0.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -18,6 +18,34 @@ Dazu Startmenü-Einträge, auf Wunsch eine Desktop-Verknüpfung und ein Uninstal
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Neu in 2.3.0
+
+**Beide Werkzeuge sehen wieder anders aus, und diesmal ruhiger.** Die
+Seitenleiste ist jetzt grau und trägt Symbole, die Arbeitsfläche liegt heller
+darüber, die Karten sind weiß. Drei Grautöne, gestapelt wie bei einem Mac
+Fenster. Die ausgewählte Seite ist eine weiße Fläche, keine kaum sichtbare
+Tönung mehr.
+
+**Die Einstellungen sind neu gebaut.** Statt gestapelter Felder stehen dort
+jetzt gruppierte Zeilen unter einer leisen Überschrift, getrennt durch
+Haarlinien. Und aus den Häkchen sind **echte Schalter** geworden, so wie am
+Telefon: über den Raum hinweg erkennbar, ob etwas an oder aus ist. Das kleine
+Windows Kästchen war aus einem anderen Jahrzehnt.
+
+**Alle Texte kommen ohne Gedankenstriche aus.** Rund siebzig Meldungen und
+Beschriftungen sind neu formuliert, mit Komma, Punkt oder Mittelpunkt statt des
+langen Strichs. Ein Test hält das fest, damit es so bleibt. Echte Dateinamen
+wie `how-to-use-backup.html` bleiben natürlich, wie sie heißen.
+
+**An der Funktion ändert sich nichts.** Kein Eingriff in das Locken, in die
+Erkennung der Kundendatei, in die XDF Suche oder in das Zusammenführen der
+AutoTuner Backups. Deine Einstellungen bleiben stehen.
+
+Eine Anmerkung zur Schrift: der Entwurf nutzt Instrument Sans, die auf einem
+normalen Windows PC nicht installiert ist. Die App bleibt deshalb bei Segoe UI
+Variable, der nächstliegenden Schrift, die auf jedem Rechner da ist. Getragen
+wird der Look ohnehin von Aufbau und Flächen, nicht von der Schriftart.
 
 ## Neu in 2.2.0
 
