@@ -47,12 +47,24 @@ _TkBase = tk.Tk if TK_AVAILABLE else object
 class DmeApp(_TkBase):
     """The window. It owns the shell, the config and the language."""
 
-    def __init__(self, start_page="lock"):
+    #: How big the window opens. Set before anything is built, not after.
+    DEFAULT_SIZE = (1120, 800)
+
+    def __init__(self, start_page="lock", geometry=None):
         super().__init__()
+        # Out of sight until it is finished. Assembling a window that is
+        # already on screen is what made it wobble on open: it appeared at its
+        # natural size, jumped to 1120 x 800, and every wrapped text reflowed
+        # afterwards, in front of you.
+        self.withdraw()
         ui.init(self)
         self.title(f"{APP_NAME} · {brand.VENDOR}")
         self.configure(bg=ui.BG)
         self.minsize(ui.px(980), ui.px(700))
+        # The size comes first, so every text is wrapped to the width it will
+        # really have, the first time, instead of to whatever tk guessed.
+        self.geometry(geometry or "{}x{}".format(ui.px(self.DEFAULT_SIZE[0]),
+                                                 ui.px(self.DEFAULT_SIZE[1])))
         brand.apply_window_icon(self)
 
         # The lock tool owns the settings file; the whole app shares it.
@@ -64,6 +76,25 @@ class DmeApp(_TkBase):
         self.pages = {}
         self._start_page = start_page if start_page in AREAS else "lock"
         self._build()
+        self._compose()
+
+    def _compose(self):
+        """Lay it all out, settle it, and only then show it.
+
+        What appears is one finished picture. Nothing wraps, jumps, fades or
+        resizes after the window is visible.
+        """
+        self.update_idletasks()
+        self.deiconify()
+        self.update()            # map, take the resize, wrap everything to it
+        # One width settling can change another, which owes a second pass.
+        # Five is far more than the two this layout actually needs.
+        for _ in range(5):
+            ui.finish_animations()   # the rings fade on the way in, not after
+            if not ui.flush_resize():
+                break
+            self.update_idletasks()
+        self.update_idletasks()
 
     # ── build ───────────────────────────────────────────────────────────────
     def _nav(self):
@@ -221,7 +252,6 @@ def main(start_page="lock") -> int:
         return 1
     ui.enable_dpi_awareness()
     app = DmeApp(start_page=start_page)
-    app.geometry(f"{ui.px(1120)}x{ui.px(800)}")
     app.mainloop()
     return 0
 

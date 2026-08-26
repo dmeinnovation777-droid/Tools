@@ -53,7 +53,7 @@ Größen bereit.
 unter *Assets*:
 
 ```
-DME-Innovation-Tools-Setup-3.1.0.exe
+DME-Innovation-Tools-Setup-3.1.1.exe
 ```
 
 Windows zeigt bei unsignierten Setups „Der Computer wurde durch Windows
@@ -375,7 +375,7 @@ build_exe.bat           :: nur die drei .exe, ohne Setup
 (`winget install JRSoftware.InnoSetup`). Ergebnis:
 
 ```
-dist\DME-Innovation-Tools-Setup-3.1.0.exe
+dist\DME-Innovation-Tools-Setup-3.1.1.exe
 dist\DME Innovation Tools.exe
 ```
 
@@ -472,6 +472,7 @@ xvfb-run -a -s "-screen 0 1120x860x24" python tests/smoke_gui_mhd_lock.py
 xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_layout.py
 xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_language.py
 xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_responsive.py
+xvfb-run -a -s "-screen 0 1200x900x24" python tests/smoke_gui_startup.py
 ```
 
 Der GUI-Test des Lock Tools ersetzt den lizenzierten Builder durch ein Stub-
@@ -485,6 +486,9 @@ Warteschlange und Einstellungen den Neuaufbau überleben.
 `smoke_gui_responsive.py` baut zwei echte 8-MB-Images und misst, dass die teure
 Hälfte der Vorprüfung den Fensterthread nicht mehr betritt: eine ganze VIN
 eintippen darf das Fenster keine 60 ms am Stück blockieren.
+`smoke_gui_startup.py` nimmt in dem Augenblick, in dem das Fenster erscheint,
+Größe und Lage von rund zwanzig Bezugspunkten auf, pumpt eine halbe Sekunde und
+vergleicht: bewegt sich irgendetwas, hat die App beim Öffnen gewackelt.
 
 ---
 

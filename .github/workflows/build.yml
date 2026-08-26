@@ -45,6 +45,8 @@ jobs:
         run: xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_language.py
       - name: The window stays alive while it works
         run: xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_responsive.py
+      - name: Nothing moves after the window appears
+        run: xvfb-run -a -s "-screen 0 1200x900x24" python tests/smoke_gui_startup.py
 
   build-windows:
     name: Build Windows installer

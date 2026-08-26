@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-3.1.0.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-3.1.1.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -23,6 +23,32 @@ ein Uninstaller.
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Korrektur in 3.1.1
+
+**Beim Öffnen hat die App gewackelt.** Sie erschien, stand kurz da, und
+rückte sich dann selbst zurecht. Zwei Ursachen, beide aus 3.1.0:
+
+* Das Fenster wurde in seiner natürlichen Größe aufgebaut und **erst danach**
+  auf 1120 × 800 gesetzt. Jeder umbrechende Text war also auf eine falsche
+  Breite umgebrochen.
+* Das Entprellen der Größenänderung, das in 3.1.0 das Ziehen am Fensterrand
+  flüssig gemacht hat, galt auch für den **ersten** Aufbau. Der ist aber keine
+  Ziehbewegung: die Folge war, dass das Fenster sichtbar dastand und fünfzig
+  Millisekunden später überall neu umbrach.
+
+Gemessen an einem Testlauf haben sich sechs Dinge bewegt, nachdem das Fenster
+schon zu sehen war, darunter die Inhaltsspalte **jedes** Bereichs, die um rund
+200 Pixel breiter sprang.
+
+Jetzt bekommt das Fenster seine Größe, bevor irgendetwas gebaut wird, es wird
+unsichtbar fertig zusammengesetzt und erst dann gezeigt. Der erste Aufbau wird
+nicht mehr entprellt. Was erscheint, ist ein fertiges Bild.
+
+Ein neuer Test hält das fest: er nimmt in dem Augenblick, in dem das Fenster
+erscheint, Größe und Lage von rund zwanzig Bezugspunkten auf, lässt eine halbe
+Sekunde vergehen und vergleicht. Bewegt sich irgendetwas, schlägt er fehl.
+Gegen 3.1.0 schlägt er fehl, mit genau den sechs Meldungen von oben.
 
 ## Was 3.1.0 anders macht
 

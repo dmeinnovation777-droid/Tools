@@ -326,6 +326,14 @@ def stop_animations():
     _RUNNING.clear()
 
 
+def finish_animations():
+    """Jump everything in flight to its end. Used before the window is shown,
+    and by the tests: an abandoned tween would leave a half faded ring."""
+    for animation in list(_RUNNING):
+        animation.finish()
+    _RUNNING.clear()
+
+
 class Animation:
     """One running tween. Keep it to cancel it."""
 
@@ -370,6 +378,16 @@ class Animation:
                 pass
             self._after = None
 
+    def finish(self):
+        """Go straight to the end of the curve rather than stop halfway."""
+        self.cancel()
+        try:
+            self._step(self._ease(1.0))
+        except tk.TclError:
+            return
+        if self._done:
+            self._done()
+
     @property
     def running(self):
         return self._after is not None
@@ -392,6 +410,10 @@ def mix(first: str, second: str, fraction: float) -> str:
         int(round(x + (y - x) * fraction)) for x, y in zip(a, b))
 
 
+# Every debounced resize watcher, so a pending one can be pulled forward.
+_RESIZERS: list = []
+
+
 def on_resize(widget, callback, delay=50):
     """Run `callback(width, height)` once the resizing stops.
 
@@ -401,7 +423,7 @@ def on_resize(widget, callback, delay=50):
     milliseconds after the last pixel is soon enough to look instant and rare
     enough to cost nothing.
     """
-    state = {"after": None, "size": None}
+    state = {"after": None, "size": None, "seen": False, "widget": widget}
 
     def fire():
         state["after"] = None
@@ -415,6 +437,13 @@ def on_resize(widget, callback, delay=50):
         if size == state["size"]:
             return
         state["size"] = size
+        if not state["seen"]:
+            # The very first size is the window being built, not somebody
+            # dragging its edge. Waiting 50 ms for that one is what made the
+            # app wobble on open: it stood there and then rewrapped itself.
+            state["seen"] = True
+            fire()
+            return
         if state["after"] is not None:
             try:
                 widget.after_cancel(state["after"])
@@ -422,8 +451,40 @@ def on_resize(widget, callback, delay=50):
                 pass
         state["after"] = widget.after(delay, fire)
 
+    state["fire"] = fire
+    _RESIZERS.append(state)
     widget.bind("<Configure>", configured, add="+")
     return state
+
+
+def flush_resize():
+    """Run everything the debounce still owes, right now.
+
+    Used before the window is shown, and by the tests, so that what is measured
+    is the finished layout and not one that is still fifty milliseconds away.
+    Returns how many fired: one flush can change a width, which owes another,
+    so the caller runs this until it comes back quiet.
+    """
+    fired = 0
+    alive = []
+    for state in list(_RESIZERS):
+        widget = state["widget"]
+        try:
+            if not widget.winfo_exists():
+                continue                      # its page was thrown away
+        except tk.TclError:
+            continue
+        alive.append(state)
+        if state["after"] is not None:
+            try:
+                widget.after_cancel(state["after"])
+            except tk.TclError:
+                pass
+            state["after"] = None
+            state["fire"]()
+            fired += 1
+    _RESIZERS[:] = alive
+    return fired
 
 
 def wrap_to_parent(label, minimum=None, inset=None):
@@ -1956,11 +2017,16 @@ class Shell(tk.Frame):
                                done=lambda: page.place_configure(rely=0.0))
 
     def settle(self):
-        """Put every page exactly where it belongs, now. For the tests, and
+        """Put everything exactly where it belongs, now. For the tests, and
         for a rebuild that must not catch a page mid flight."""
         if self._motion is not None:
             self._motion.cancel()
             self._motion = None
+        finish_animations()
+        for _ in range(5):
+            if not flush_resize():
+                break
+            self.update_idletasks()
         for page in self._mounted.values():
             page.place_configure(rely=0.0)
         self.nav.settle()
