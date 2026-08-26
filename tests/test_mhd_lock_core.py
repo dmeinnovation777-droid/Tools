@@ -3,6 +3,7 @@
 import os
 import sys
 import tempfile
+import time
 import textwrap
 import unittest
 
@@ -953,6 +954,102 @@ class TestXdfLibrary(unittest.TestCase):
         found = m.resolve_inputs(self.tuned, library_dir=self.library)
         self.assertEqual(found.xdf, "")
         self.assertTrue(any("Stopped checking" in note for note in found.notes))
+
+
+class TestHowTheBuilderIsStarted(unittest.TestCase):
+    """A customer job failed here, and neither the tests nor the pre-flight saw it.
+
+    The builder takes the tuned .bin as a command line argument, which is what
+    dropping the file onto the .exe does. Started without one it has nothing to
+    work on: it prints nothing, goes straight to its closing prompt, and writes
+    no .mhd. And it never exits by itself, because it ends on Console.ReadKey().
+    """
+
+    def setUp(self):
+        if os.name == "nt":
+            self.skipTest("shell stubs are POSIX only")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _stub(self, body):
+        path = os.path.join(self.dir, "stub.sh")
+        write(path, "#!/bin/sh\n" + body)
+        os.chmod(path, 0o755)
+        return path
+
+    def test_the_tuned_file_is_handed_over(self):
+        stub = self._stub('echo "arg1=$1"\necho "Press a key..."\nsleep 60\n')
+        target = write(os.path.join(self.dir, "tune.bin"), b"\x00")
+        result = m.run_builder(stub, self.dir, target=target, timeout=30)
+        self.assertIn(f"arg1={target}", "\n".join(result.lines))
+
+    def test_without_a_target_nothing_is_appended(self):
+        stub = self._stub('echo "argc=$#"\necho "Press a key..."\nsleep 60\n')
+        result = m.run_builder(stub, self.dir, timeout=30)
+        self.assertIn("argc=0", "\n".join(result.lines))
+
+    def test_the_closing_prompt_ends_the_run(self):
+        """Without this the run would sit there until the timeout."""
+        stub = self._stub('echo "Map correctly written : x.mhd"\n'
+                          'echo "Press a key..."\nsleep 120\n')
+        started = time.monotonic()
+        result = m.run_builder(stub, self.dir, timeout=90)
+        self.assertLess(time.monotonic() - started, 30, "it waited for the process")
+        self.assertFalse(result.timed_out)
+        self.assertTrue(result.ok, result.errors)
+
+    def test_a_builder_that_exits_by_itself_is_fine_too(self):
+        stub = self._stub('echo "Map correctly written : x.mhd"\n')
+        result = m.run_builder(stub, self.dir, timeout=30)
+        self.assertTrue(result.ok, result.errors)
+
+    def test_stdin_is_not_redirected(self):
+        """ReadKey reads the console, not stdin. Redirecting it is what made
+        .NET raise instead of waiting."""
+        import inspect
+        source = inspect.getsource(m.run_builder)
+        self.assertNotIn("stdin=subprocess.PIPE", source)
+        self.assertIn("stdin is deliberately NOT redirected", source)
+
+
+class TestTheConsoleOutputIsDecoded(unittest.TestCase):
+    """A .NET console writes the OEM code page, not UTF-8."""
+
+    def test_german_umlauts_survive(self):
+        raw = "Schlüssel können nicht gelesen werden".encode("cp850")
+        self.assertEqual(m.decode_console(raw),
+                         "Schlüssel können nicht gelesen werden")
+
+    def test_utf8_still_wins_when_it_fits(self):
+        self.assertEqual(m.decode_console("Map correctly written".encode()),
+                         "Map correctly written")
+
+    def test_nothing_ever_raises(self):
+        self.assertIsInstance(m.decode_console(b"\xff\xfe\x00broken"), str)
+
+
+class TestTheVerdictDoesNotDependOnWindowsLanguage(unittest.TestCase):
+    """The customer's Windows speaks German. The markers were all English."""
+
+    GERMAN = [
+        "Map correctly written : tune.mhd",
+        "Press a key...",
+        "Unbehandelte Ausnahme: System.InvalidOperationException: Schlüssel können "
+        "nicht gelesen werden, wenn keine der Anwendungen eine Konsole besitzt.",
+        "   bei System.Console.ReadKey(Boolean intercept)",
+    ]
+
+    def test_the_german_readkey_crash_is_read_as_noise(self):
+        result = m.parse_builder_output(self.GERMAN)
+        self.assertTrue(result.ok, result.errors)
+        self.assertEqual(result.errors, [])
+
+    def test_it_is_classified_the_same_as_the_english_one(self):
+        for line in self.GERMAN[2:]:
+            self.assertEqual(m.classify_line(line), "dim", line)
 
 
 class TestTheLogIsReachableAfterAFailure(unittest.TestCase):

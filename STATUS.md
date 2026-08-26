@@ -13,15 +13,15 @@ Bedienung und Aufbau stehen im [README](README.md).
 | Branding-Pipeline aus dem Vektor-Logo | fertig |
 | Gemeinsames Design-System `dme_ui.py` | fertig, heller Look mit Schaltern |
 | AutoTuner Backup Tool | fertig, 36 Unit-Tests + GUI-Smoke-Test |
-| MHD Lock Tool | fertig, 84 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
+| MHD Lock Tool | fertig, 99 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
 | Starter `dme_suite.py` | fertig, 17 Unit-Tests + GUI-Smoke-Test |
 | Windows-Setup (Inno Setup) + CI-Build | fertig |
 | README, Build-Skripte | fertig |
 
-`python -m unittest discover -s tests` → 172 Tests, grün.
+`python -m unittest discover -s tests` → 182 Tests, grün.
 
 Produktname und Version stehen zentral in `dme_brand.py`
-(`SUITE = "DME Innovation Tools"`, `VERSION = "2.3.2"`); beide Werkzeuge, das
+(`SUITE = "DME Innovation Tools"`, `VERSION = "2.3.3"`); beide Werkzeuge, das
 Setup und der Dateiname der Setup-Datei ziehen daraus.
 
 ---
@@ -247,6 +247,35 @@ inhaltliche Abgleich weiter, aber gedeckelt durch `CONTENT_SCAN_BUDGET = 250`
 (~2,7 s) mit einer Notiz statt einer hängenden Oberfläche. Gibt es mehrere XDFs
 zu derselben ROM-Nummer, gewinnt die neueste (`_newest`) und die Notiz nennt
 die gewählte Datei.
+
+### 3.6a Wie der Builder gestartet werden muss
+
+Ein echter Auftrag beim Kunden ist gescheitert, obwohl die Vorprüfung grün war.
+Zwei Annahmen im Code waren falsch, beide standen nie unter Test, weil der
+Rauchtest-Stub sich braver verhielt als das Original.
+
+1. **Der Builder nimmt die getunte Datei als Übergabewert.** Er scannt sein
+   Verzeichnis nicht. Was der Tuner tut, ist die `.bin` im Explorer auf die
+   `.exe` zu ziehen, und das entspricht `TuningMapBuilder-v6.exe <pfad>`.
+   `XDF_Tools.Program.Main(String[] args)` aus dem Stacktrace passt dazu. Ohne
+   Übergabe hatte er nichts zu tun: keine Ausgabe, direkt die Schlusszeile,
+   keine `.mhd`.
+2. **Er braucht eine eigene Konsole, und stdin darf nicht umgeleitet sein.**
+   Er endet auf `Console.ReadKey()`, das den Konsolen-Eingabepuffer liest und
+   nicht stdin. .NET verweigert den Aufruf, wenn keine Konsole da ist oder
+   stdin umgeleitet wurde, und wirft `InvalidOperationException`. Das Schreiben
+   von `"\r\n"` nach stdin, das vorher dort stand, konnte nie wirken.
+   Jetzt: `CREATE_NEW_CONSOLE` mit verborgenem Fenster, stdin unangetastet, und
+   `Press a key` ist das Schlusszeichen, an dem der Prozessbaum beendet wird.
+
+Dazu zwei Nebenbefunde aus demselben Protokoll: die Ausgabe kam als OEM-Codepage
+(`Schl?ssel` statt `Schlüssel`) und wurde als UTF-8 gelesen, und die
+Marker-Listen kannten nur englische Windows-Meldungen. Entziffert wird jetzt
+über eine Kandidatenliste, erkannt wird am Typnamen.
+
+Der Stub im Rauchtest arbeitet seitdem nur mit Übergabewert und beendet sich
+nicht von selbst. Ohne die Übergabe fällt der Test durch, mit ihr läuft er in
+zwei Sekunden.
 
 ### 3.7 Ordner-Modus
 

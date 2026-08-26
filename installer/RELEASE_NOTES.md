@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-2.3.2.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-2.3.3.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -18,6 +18,33 @@ Dazu Startmenü-Einträge, auf Wunsch eine Desktop-Verknüpfung und ein Uninstal
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Korrektur in 2.3.3
+
+**Lock now hat den Builder gestartet, ihm aber nie gesagt, woran er arbeiten
+soll.** Das Ergebnis war ein grün geprüfter Auftrag, der dann mit
+`Nothing was locked` endete.
+
+Der TuningMapBuilder nimmt die getunte Datei als Übergabewert entgegen. Genau
+das passiert, wenn Du sie im Explorer auf die `.exe` ziehst, und genau so
+arbeitest Du damit. Die App hat ihn ohne Übergabe gestartet. Er hatte also
+nichts zu tun, gab nichts aus und lief direkt auf seine Schlusszeile.
+
+Behoben, und dabei zwei weitere Dinge am selben Handgriff:
+
+* **Die getunte Datei wird übergeben**, so wie beim Draufziehen.
+* **Der Builder bekommt eine eigene Konsole**, deren Fenster verborgen bleibt,
+  und seine Eingabe wird nicht mehr umgeleitet. Er endet auf einem Tastendruck,
+  und den verweigert Windows einem Programm ohne Konsole mit einer Ausnahme.
+  Die stand bei Dir im Protokoll.
+* **Deutsche Windows-Meldungen werden jetzt richtig gelesen.** Vorher stand da
+  `Schl?ssel` statt `Schlüssel`, und die Bewertung kannte nur die englischen
+  Texte.
+
+Der Rauchtest verhält sich jetzt wie das echte Werkzeug: er arbeitet nur, wenn
+er die Datei übergeben bekommt, und er beendet sich nicht von selbst. Ohne die
+Übergabe fällt er durch, mit ihr läuft er. Das war vorher nicht so, und deshalb
+ist der Fehler bis zu Dir durchgekommen.
 
 ## Neu in 2.3.2
 

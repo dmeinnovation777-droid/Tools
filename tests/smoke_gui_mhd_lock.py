@@ -33,20 +33,26 @@ assert m.TK_AVAILABLE, "tkinter missing"
 CAR = os.path.join(WORK, "M4 Kunde")
 ROM_ID = "00005C6414C808"
 
+# The stub behaves like the real builder in the two ways that broke a customer
+# job, so that a regression in either shows up here instead of on his machine:
+#
+#   * it works on the file handed to it as an argument, the way dropping a .bin
+#     onto the .exe does. No argument, no work - exactly what the real one did.
+#   * it does not exit. It ends on its prompt and waits, like Console.ReadKey().
 STUB = textwrap.dedent("""\
     #!/bin/sh
-    echo "opened BIN: $(ls *_original.bin) , size 0x800000"
-    echo "Found 1373 tables"
-    echo "Restrict to VIN : $(ls *_vin.txt | sed 's/_vin.txt//')"
-    echo "Total bytes changed: 96"
-    for f in *.bin; do
-        case "$f" in
-            *_original.bin) ;;
-            *) head -c 91136 /dev/zero > "${f%.bin}.mhd"
-               echo "Map correctly written : ${f%.bin}.mhd" ;;
-        esac
-    done
+    target="$1"
+    if [ -n "$target" ] && [ -f "$target" ]; then
+        echo "opened BIN: $(ls *_original.bin) , size 0x800000"
+        echo "Found 1373 tables"
+        echo "Restrict to VIN : $(ls *_vin.txt | sed 's/_vin.txt//')"
+        echo "Total bytes changed: 96"
+        base=$(basename "$target" .bin)
+        head -c 91136 /dev/zero > "$base.mhd"
+        echo "Map correctly written : $base.mhd"
+    fi
     echo "Press a key..."
+    sleep 300
     """)
 
 SAMPLE_XDF = textwrap.dedent("""\

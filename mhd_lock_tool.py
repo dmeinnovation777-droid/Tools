@@ -87,13 +87,19 @@ ERROR_MARKERS = (
     "Unsupported DME", "Prozess not supported", "Failed to serialize",
     "Unhandled area", "Unhandled exception",
 )
-# The builder ends on Console.ReadKey(). With stdin redirected .NET raises
-# InvalidOperationException *after* the map has already been written, noise
-# not a failure.
+# The builder ends on Console.ReadKey(), which reads the console input buffer
+# and not stdin. A process started without a console, or with stdin redirected,
+# therefore does not merely miss the keypress: .NET raises
+# InvalidOperationException and the run produces nothing. That is what happened
+# on a customer's machine, and it is why run_builder gives it a real console.
+# Seen through a pipe the prompt is still the last thing it prints, so it is
+# also the signal that the work is over.
+END_MARKER = "Press a key"
 BENIGN_MARKERS = (
-    "Cannot read keys",
+    "Cannot read keys",             # English Windows
     "Press a key",
-    "System.Console.ReadKey",
+    "System.Console.ReadKey",       # the type name is the same in every language
+    "InvalidOperationException",
 )
 WARN_MARKERS = (
     "WARNING", "bytes not referenced in the XDFs", "MUST FIX axis",
@@ -1024,9 +1030,53 @@ def parse_builder_output(lines) -> RunResult:
     return result
 
 
-def run_builder(exe: str, workdir: str, extra_args=None, pass_workdir=False,
-                on_line=None, timeout: int = 600, stop_event=None) -> RunResult:
-    """Run the MHD builder in `workdir` and stream its output line by line."""
+def _terminate_tree(process) -> None:
+    """End the builder and anything it started. It is waiting for a keypress."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                       capture_output=True)
+    else:
+        process.kill()
+    try:
+        process.wait(timeout=15)
+    except Exception:
+        pass
+
+
+# A .NET console writes in the machine's OEM code page, not UTF-8. Decoding it
+# as UTF-8 turned the customer's "Schlüssel" into "Schl?ssel" and would mangle
+# any file name with an umlaut in it.
+_OUTPUT_ENCODINGS = ("utf-8", "cp850", "cp1252")
+
+
+def decode_console(raw: bytes) -> str:
+    for encoding in _OUTPUT_ENCODINGS:
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1", "replace")
+
+
+def run_builder(exe: str, workdir: str, target: str = "", extra_args=None,
+                pass_workdir=False, on_line=None, timeout: int = 600,
+                stop_event=None) -> RunResult:
+    """Run the MHD builder on `target` and stream its output line by line.
+
+    Two things about this tool, both learned from a failed customer job:
+
+    `target` is the tuned .bin, handed over as a command line argument. That is
+    what dropping a file onto the .exe in Explorer does, and it is how tuners
+    use it. Started without one the builder has nothing to work on: it prints
+    nothing, goes straight to its closing prompt, and the run yields no .mhd.
+
+    And it is started the way a double click starts it, with its own console and
+    with stdin left alone. The builder finishes on Console.ReadKey(), which .NET
+    refuses when the process has no console or when stdin is redirected - it
+    raises instead. Writing a newline into stdin cannot help either, because
+    ReadKey does not read stdin. Nobody is going to press that key, so
+    `Press a key` is treated as the end of the work and the process ends there.
+    """
     if not exe or not os.path.isfile(exe):
         result = RunResult()
         result.launch_error = ("MHD map builder not configured. Set the path to "
@@ -1034,6 +1084,8 @@ def run_builder(exe: str, workdir: str, extra_args=None, pass_workdir=False,
         return result
 
     command = [exe]
+    if target:
+        command.append(target)
     if pass_workdir:
         command.append(workdir)
     if extra_args:
@@ -1042,15 +1094,21 @@ def run_builder(exe: str, workdir: str, extra_args=None, pass_workdir=False,
 
     kwargs = {}
     if os.name == "nt":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        # Its own console, with the window hidden: the builder gets what it
+        # needs, the tuner sees nothing flash up.
+        info = subprocess.STARTUPINFO()
+        info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        info.wShowWindow = subprocess.SW_HIDE
+        kwargs["startupinfo"] = info
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
 
     lines: list[str] = []
     state = {"timed_out": False}
     try:
+        # stdin is deliberately NOT redirected.
         process = subprocess.Popen(
-            command, cwd=workdir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-            errors="replace", bufsize=1, **kwargs)
+            command, cwd=workdir, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, **kwargs)
     except OSError as exc:
         result = RunResult()
         result.launch_error = f"Could not start the builder: {exc}"
@@ -1058,30 +1116,29 @@ def run_builder(exe: str, workdir: str, extra_args=None, pass_workdir=False,
 
     def _on_timeout():
         state["timed_out"] = True
-        process.kill()
+        _terminate_tree(process)
 
     timer = threading.Timer(timeout, _on_timeout)
     timer.daemon = True
     timer.start()
     try:
-        try:  # the builder ends on "Press a key…", feed it one
-            process.stdin.write("\r\n")
-            process.stdin.flush()
-        except OSError:
-            pass
-        for raw in process.stdout:
-            line = raw.rstrip("\r\n")
+        while True:
+            raw = process.stdout.readline()
+            if not raw:
+                break
+            line = decode_console(raw).rstrip("\r\n")
             lines.append(line)
             if on_line:
                 on_line(line, classify_line(line))
-            if stop_event is not None and stop_event.is_set():
-                process.kill()
+            if END_MARKER in line:
                 break
-        process.wait()
+            if stop_event is not None and stop_event.is_set():
+                break
     finally:
         timer.cancel()
+        _terminate_tree(process)
         try:
-            process.stdin.close()
+            process.stdout.close()
         except Exception:
             pass
 
@@ -2148,6 +2205,7 @@ class MhdLockTool(_TkBase):
 
                 result = run_builder(
                     exe, workdir,
+                    target=os.path.join(workdir, manifest["tuned"]),
                     extra_args=cfg.get("builder_args", ""),
                     pass_workdir=bool(cfg.get("pass_workdir_arg")),
                     on_line=lambda line, tag: self._post("log", target=target,
