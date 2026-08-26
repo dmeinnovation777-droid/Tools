@@ -28,7 +28,8 @@ with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
     zf.writestr("contents.ini", at.build_contents_ini(
         {"make": "Lamborghini", "model": "Huracan", "variant": "5.2 V10 FSI",
          "year": "2014", "ecu_model": "MED17.1.1", "ecu_maker": "Bosch",
-         "fuel": "PETROL", "ps": "610", "vin": "ZHWUC1ZF9ELA02345"}))
+         "fuel": "PETROL", "ps": "610", "vin": "ZHWUC1ZF9ELA02345",
+         "series": "LB724", "kw": "449"}))
     zf.writestr("how-to-use-backup.html", at.HOW_TO_USE_HTML)
 
 app = dme_app.DmeApp(start_page="backup")
@@ -129,6 +130,30 @@ assert os.path.exists(second), "an empty line still blocked the archive"
 with zipfile.ZipFile(second) as zf:
     assert zf.namelist()[:4] == ["iflash0.bin", "iflash1.bin", "dflash0.bin", "dflash1.bin"]
 print("blank line OK: not counted, not packed, not in the way")
+
+# ── the car comes back with the layout ──────────────────────────────────────
+# Five of the fourteen fields have no box on the page. They can only come from
+# the archive the .bin came out of, and before 3.2.1 they came back empty.
+with zipfile.ZipFile(second) as zf:
+    meta = at.parse_ini(zf.read("contents.ini").decode())
+assert meta["VehicleSeries"] == "LB724", \
+    f"the series has no box and was lost: {meta['VehicleSeries']!r}"
+assert meta["OutputKW"] == "449", \
+    f"the kW has no box and was lost: {meta['OutputKW']!r}"
+assert meta["EngineType"] == "PETROL", "the fuel changed on the way back"
+
+# A field cleared on purpose stays cleared: the boxes have the last word, or a
+# VIN wiped before handing the file on would quietly come back.
+backup._meta_vars["VehicleVIN"].set("")
+third = os.path.join(tmp, "no_vin.zip")
+backup._b2z_out_var.set(third)
+backup._run_bin_to_zip()
+app.update()
+with zipfile.ZipFile(third) as zf:
+    meta = at.parse_ini(zf.read("contents.ini").decode())
+assert meta["VehicleVIN"] == "", f"the wiped VIN came back: {meta['VehicleVIN']!r}"
+assert meta["VehicleSeries"] == "LB724", "clearing the VIN took the series with it"
+print("vehicle data OK: carried across, and a cleared field stays cleared")
 
 # error path -> banner, no crash
 backup._b2z_bin_var.set("")

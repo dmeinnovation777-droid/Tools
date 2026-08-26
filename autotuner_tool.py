@@ -1093,17 +1093,18 @@ class BackupUI:
             self.banner.show("error", t("err.no_parts"))
             return
 
-        # Everything the original archive said about the car, then whatever is
-        # in the boxes on top of it. The five fields with no box - series,
-        # type, usage, kW, hardware - survive this way instead of coming back
-        # empty in the customer's archive.
+        # The five fields with no box on the page - series, type, usage, kW,
+        # hardware - can only come from the archive the .bin came out of, so
+        # they are taken from what was remembered. The nine with a box are
+        # whatever the box says right now, empty included: the boxes are
+        # filled from the same memory when the .bin is picked, so clearing one
+        # is a decision, and a VIN wiped before handing the file on has to
+        # stay wiped.
         remembered = remembered_meta(os.path.getsize(bin_path))
         meta = {INI_KEYS[key]: value for key, value in remembered.items()
-                if key in INI_KEYS and value}
+                if key in INI_KEYS and value and key not in self._meta_vars}
         for key, var in self._meta_vars.items():
-            typed = var.get().strip()
-            if typed:
-                meta[INI_KEYS[key]] = typed
+            meta[INI_KEYS[key]] = var.get().strip()
         meta.setdefault('hardware', 'Autotuner')
 
         self.app.set_status(t("word.running"), "busy")
