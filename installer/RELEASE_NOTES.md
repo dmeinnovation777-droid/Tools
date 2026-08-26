@@ -1,23 +1,57 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-2.3.4.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-3.0.0.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
 Manche Virenscanner schlagen bei PyInstaller-Programmen an; das ist ein Fehlalarm.
 
-Installiert werden:
+**Neu in 3.0.0: aus drei Programmen wird eine App.** Ein Fenster, vier
+Bereiche in der Leiste oben, und in jedem Bereich dieselbe senkrechte Kette von
+Schritten. Es öffnet sich kein zweites Fenster mehr, für nichts.
 
-| Programm | Zweck |
+Installiert wird:
+
+| Startmenü-Eintrag | öffnet die App auf |
 | --- | --- |
-| **DME Innovation Tools** | Starter — zeigt beide Werkzeuge zur Auswahl |
-| **AutoTuner Backup Tool** | AutoTuner-Backups (`.zip`/`.bak`) zu einer `.bin` zusammenführen und zurück verpacken |
-| **MHD Lock Tool** | Locken von MHD+ Tune-Files automatisieren |
+| **DME Innovation Tools** | Locken |
+| **MHD Lock Tool** | Locken |
+| **AutoTuner Backup Tool** | Backup |
 
-Dazu Startmenü-Einträge, auf Wunsch eine Desktop-Verknüpfung und ein Uninstaller.
+Alle drei starten dieselbe Datei. Dazu auf Wunsch eine Desktop-Verknüpfung und
+ein Uninstaller.
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Was 3.0.0 anders macht
+
+**Eine App statt drei Programme.** Der Starter ist weg. Locken, Stapel, Backup
+und Einstellungen sind Bereiche eines Fensters, oben in einer Leiste. Nichts
+öffnet mehr ein zweites Fenster: das Protokoll steht in dem Schritt, der gerade
+läuft, ein Fehler steht in dem Schritt, in dem er auftritt, und das Ergebnis
+steht da, wo es entstanden ist.
+
+**Ein Fluss statt Karten.** Jeder Bereich ist eine senkrechte Kette von
+Schritten mit einem Ring davor. Erledigte Schritte bleiben grün stehen, der
+laufende trägt als einziger das Amber, die kommenden stehen grau da. Man sieht
+auf einen Blick, wo man ist und was noch fehlt.
+
+**Deutsch und Englisch, umschaltbar.** Der Schalter steht ganz oben in den
+Einstellungen und wird gemerkt. Deutsch ist voreingestellt. Fachwörter bleiben
+stehen, wie Du sie sagst: Lock, Tune, Stock ROM, XDF, Tool key, VIN.
+
+**Der Fluss hält an, wo es klemmt.** Eine fehlende VIN färbt nicht mehr die
+Vorprüfung rot, sondern den VIN-Schritt. Ein falsches Stock ROM hält bei der
+Vorprüfung an und sagt beide Program IDs.
+
+**Nichts verrutscht mehr.** Der Fix aus 2.3.4 gilt weiter und wird jetzt in
+beiden Sprachen gemessen: alle vier Bereiche fangen auf demselben Pixel an, und
+ein Sprachwechsel bewegt keine Zeile.
+
+Am Motor hat sich nichts geändert. Auflösung, Vorprüfung, Staging, der Aufruf
+des Builders und das Zusammenführen der Backups sind Zeile für Zeile dieselben
+wie in 2.3.4. Umgebaut wurde nur, was man sieht.
 
 ## Korrektur in 2.3.4
 

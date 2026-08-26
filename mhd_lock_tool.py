@@ -31,6 +31,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
 import dme_brand as brand
+from dme_text import t
 
 try:
     import tkinter as tk
@@ -46,17 +47,6 @@ APP_NAME = "MHD Lock Tool"
 APP_VERSION = brand.VERSION
 APP_TAGLINE = "Automated MHD+ tune locking for the MHD Map Encryption tool"
 
-# Both pages say something different once the builder is left out of it.
-LOCK_SUBTITLE = ("Pick the customer's tuned file. Stock ROM, XDF and tool key are "
-                 "found automatically, and the VIN comes from the customer's mapswitch "
-                 "read. Check the VIN, then press Lock.")
-PREPARE_SUBTITLE = ("Pick the customer's tuned file. Stock ROM, XDF and tool key are "
-                    "found automatically, and the VIN comes from the customer's mapswitch "
-                    "read. You get the finished working folder; the .mhd is yours to make.")
-BATCH_SUBTITLE = ("Lock a whole queue in one go. Stock ROM and XDF are resolved per "
-                  "file, and every job runs in its own clean folder.")
-BATCH_PREPARE_SUBTITLE = ("Build a working folder for every file in the queue. Stock ROM "
-                          "and XDF are resolved per file, and nothing is started.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -175,15 +165,19 @@ def normalise_vin(vin: str) -> str:
 
 
 def validate_vin(vin: str) -> tuple[bool, str, str]:
-    """Return (ok, normalised, message). The builder demands exactly 17 chars."""
+    """Return (ok, normalised, message). The builder demands exactly 17 chars.
+
+    The message comes out of the word list, so the one place that decides
+    whether a VIN is good also speaks whichever language the window is in.
+    """
     value = normalise_vin(vin)
     if not value:
-        return False, value, "VIN is required. The builder needs a <VIN>_vin.txt file."
+        return False, value, t("vin.required")
     if len(value) != 17:
-        return False, value, f"VIN length is {len(value)}, must be 17 characters."
+        return False, value, t("vin.length", n=len(value))
     if not VIN_RE.match(value):
-        return False, value, "VIN contains invalid characters (I, O and Q are not allowed)."
-    return True, value, "VIN looks valid."
+        return False, value, t("vin.chars")
+    return True, value, t("vin.ok")
 
 
 def read_bytes(path: str) -> bytes:
@@ -713,6 +707,9 @@ class XdfDefinition:
 class Issue:
     level: str        # "error" | "warn" | "info"
     text: str
+    # Which step this belongs to. The flow shows the pre-flight in step 2 and
+    # the VIN in step 3, so a missing VIN must not paint step 2 red.
+    topic: str = ""
 
     def __str__(self):
         return f"[{self.level}] {self.text}"
@@ -760,8 +757,8 @@ class Preflight:
     def warnings(self) -> list[Issue]:
         return [i for i in self.issues if i.level == "warn"]
 
-    def add(self, level, text):
-        self.issues.append(Issue(level, text))
+    def add(self, level, text, topic=""):
+        self.issues.append(Issue(level, text, topic))
 
 
 def _require_file(report: Preflight, path: str, label: str, extension=None) -> bool:
@@ -782,7 +779,7 @@ def preflight(job: LockJob, definition: XdfDefinition = None) -> Preflight:
 
     ok_vin, vin, message = validate_vin(job.vin)
     report.vin = vin
-    report.add("error" if not ok_vin else "info", message)
+    report.add("error" if not ok_vin else "info", message, topic="vin")
 
     has_stock = _require_file(report, job.stock_bin, "Stock (original) .bin", ".bin")
     has_tuned = _require_file(report, job.tuned_bin, "Tuned .bin", ".bin")
@@ -1223,6 +1220,7 @@ DEFAULT_CONFIG = {
     "toolkey": "",
     "library_dir": "",
     "last_customer": "",
+    "language": "de",
 }
 
 
@@ -1232,16 +1230,18 @@ def missing_setup(config: dict, toolkey_override: str = "") -> list[str]:
     In folder mode the builder is never started, so its path is no longer a
     condition - it only decides whether the .exe is copied into the folder.
     The .toolkey stays required either way: it belongs in the folder.
+
+    Returns keys, not sentences: "builder" and "toolkey". The window turns them
+    into a sentence in whichever language it is showing.
     """
     problems = []
     if not config.get("prepare_only", False):
         exe = config.get("builder_exe", "")
         if not exe or not os.path.isfile(exe):
-            problems.append("the path to your MHD map builder (TuningMapBuilder / "
-                            "MHD Map Encryption)")
+            problems.append("builder")
     key = config.get("toolkey", "")
     if (not key or not os.path.isfile(key)) and not toolkey_override.strip():
-        problems.append("your .toolkey")
+        problems.append("toolkey")
     return problems
 
 
@@ -1352,179 +1352,439 @@ def write_report_csv(path: str, rows: list[dict]) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 NAME_TOKENS = "{customer} {vin} {date} {time} {datetime} {tuned} {stock} {source} {n}"
 
-_TkBase = tk.Tk if TK_AVAILABLE else object
+# Status words the worker posts, translated on the way into the table.
+STATUS_KEYS = {"word.queued", "word.running", "word.failed", "word.stopped",
+               "word.prepared", "word.locked"}
 
 
-class MhdLockTool(_TkBase):
-    def __init__(self):
-        super().__init__()
-        self.title(f"{APP_NAME} · {brand.VENDOR}")
-        self.configure(bg=ui.BG)
-        ui.init(self)
-        self.minsize(ui.px(960), ui.px(700))
-        brand.apply_window_icon(self)
+class LockUI:
+    """The Lock and Batch areas, and everything under Settings that belongs to
+    the builder.
 
-        self.config_data = load_config()
+    It used to be a window of its own. Now it builds its pages into the shared
+    host and writes into the shared status line; nothing below this line knows
+    or cares that it is not a window any more. The engine underneath it,
+    everything above the GUI section in this file, is unchanged.
+    """
+
+    def __init__(self, app):
+        self.app = app
+        self.config_data = app.config_data
         self.batch_jobs: list[LockJob] = []
         self._events: queue.Queue = queue.Queue()
         self._worker: threading.Thread | None = None
         self._running = False
         self._stop_event = threading.Event()
         self._preflight_after = None
+        self._drain_id = None
         self._manual: set[str] = set()
         self._job_folder = ""       # which customer folder the VIN belongs to
         self._vin_auto = False      # VIN was resolved, not typed - may be corrected
         self._setting_vin = False
         self._xdf_cache: tuple[str, float, XdfDefinition] | None = None
+        self._log_shown = False
+        self._batch_counts = {"total": 0, "unresolved": 0, "no_vin": 0}
+        self._last_output = ""
+        self._traced = False
 
-        self._build()
-        self._restore_settings()
-        self._drain_id = self.after(120, self._drain_events)
-
-    def destroy(self):
-        # The queue poller is rearmed every 120 ms. Without this, closing the
-        # window leaves one pending call that fires against a widget that is
-        # already gone.
-        if getattr(self, "_drain_id", None) is not None:
-            try:
-                self.after_cancel(self._drain_id)
-            except tk.TclError:
-                pass
-            self._drain_id = None
-        super().destroy()
-
-    # ── Shell ────────────────────────────────────────────────────────────────
-
-    NAV = [
-        {"key": "lock", "label": "Lock", "title": "Lock a tune", "icon": "lock",
-         "subtitle": LOCK_SUBTITLE,
-         "subtitles": [LOCK_SUBTITLE, PREPARE_SUBTITLE]},
-        {"key": "batch", "label": "Batch", "title": "Batch", "icon": "batch",
-         "subtitle": BATCH_SUBTITLE,
-         "subtitles": [BATCH_SUBTITLE, BATCH_PREPARE_SUBTITLE]},
-        {"key": "settings", "label": "Settings", "title": "Settings", "icon": "settings",
-         "subtitle": "Point the tool at your own licensed MHD map builder and your key. "
-                     "Set once, used for every job."},
-    ]
-
-    def _build(self):
-        self.shell = ui.Shell(self, brand, APP_NAME, APP_VERSION, self.NAV,
-                              self._show_page)
-        self.shell.pack(fill=tk.BOTH, expand=True)
-        self.tabs = self.shell
-        self.status = self.shell.status
-        self._host = self.shell.host
-        self.pages = {"lock": self._build_lock_page(),
-                      "batch": self._build_batch_page(),
-                      "settings": self._build_settings_page()}
-        self.shell.mount(self.pages)
-        self.shell.select("lock")
-
-    def _show_page(self, key):
-        self.shell.show(key)
-
-    # ── Lock page ────────────────────────────────────────────────────────────
-
-    def _build_lock_page(self):
-        page = ui.Page(self._host)
-        self.lock_page = page
-
-        # Shown only while something global is still missing.
-        self.setup_card = ui.Card(page.body, title="One-time setup")
-        self.setup_msg = tk.Label(self.setup_card.body, text="", bg=ui.CARD, fg=ui.TEXT_DIM,
-                                  font=ui.f("small"), anchor="w", justify="left",
-                                  wraplength=ui.px(800))
-        self.setup_msg.pack(fill=tk.X)
-        ui.wrap_to_parent(self.setup_msg)
-        ui.button(self.setup_card.body, "Open settings", lambda: self.tabs.select("settings"),
-                  variant="secondary", size="sm").pack(anchor="e", pady=(10, 0))
-
-        # ── 1 · the only file you have to pick ──────────────────────────────
-        step1 = page.card("Tuned file")
-        self._step1 = step1
+        # Everything the user has typed or picked lives here, not in a widget,
+        # which is what lets the language switch throw the pages away.
         self.var_tuned = tk.StringVar()
-        self.row_tuned = ui.PathRow(step1.body, "Customer's tuned ROM (.bin)",
-                                    self.var_tuned, self._pick_tuned,
-                                    browse_text="Choose…",
-                                    hint="Everything else is derived from this file")
-        self.row_tuned.pack(fill=tk.X)
-
-        ui.hr(step1.body, bg=ui.BORDER, pady=(14, 10))
-        self.res_rows = {}
-        for key, label in (("stock", "Stock ROM"), ("xdf", "XDF"), ("toolkey", "Tool key")):
-            row = ui.ResolvedRow(step1.body, label)
-            row.pack(fill=tk.X, pady=1)
-            self.res_rows[key] = row
-
-        self.manual = ui.Collapsible(step1.body, "Change manually", bg=ui.CARD)
-        self.manual.pack(fill=tk.X, pady=(10, 0))
         self.var_stock = tk.StringVar()
         self.var_xdf = tk.StringVar()
         self.var_toolkey = tk.StringVar()
+        self.var_vin = tk.StringVar()
+        self.var_customer = tk.StringVar()
+        self.var_summary = tk.StringVar()
+        self.var_batch_summary = tk.StringVar()
+        self.var_b_customer = tk.StringVar()
+        self.var_b_vin = tk.StringVar()
+        self.var_exe = tk.StringVar()
+        self.var_args = tk.StringVar()
+        self.var_timeout = tk.StringVar()
+        self.var_copy_builder = tk.BooleanVar()
+        self.var_pass_workdir = tk.BooleanVar()
+        self.var_prepare_only = tk.BooleanVar()
+        self.var_cfg_toolkey = tk.StringVar()
+        self.var_library = tk.StringVar()
+        self.var_cfg_outdir = tk.StringVar()
+        self.var_template = tk.StringVar()
+        self.var_open_after = tk.BooleanVar()
+        self.var_keep_staging = tk.BooleanVar()
+        self.var_settings_summary = tk.StringVar()
+        self._restore_settings()
+
+    # ── the two pages ───────────────────────────────────────────────────────
+    def build_pages(self):
+        return {"lock": self._build_lock_page(), "batch": self._build_batch_page()}
+
+    def after_mount(self):
+        """Once the pages hang in the shell, put the state back on them."""
+        self._update_setup_hint()
+        self._apply_prepare_mode()
+        self._batch_refresh()
+        # Always, not only with a file in hand: the empty branch is what paints
+        # the marks in step 2 grey instead of leaving them white on white.
+        self._resolve_and_check()
+        if not self.var_tuned.get().strip():
+            self.app.set_status(t("status.waiting_file"))
+        if not self._traced:
+            self.var_tuned.trace_add("write", lambda *_: self._on_tuned_changed())
+            self.var_vin.trace_add("write", lambda *_: self._on_vin_typed())
+            self.var_customer.trace_add("write", lambda *_: self._schedule_preflight())
+            for var in (self.var_exe, self.var_args, self.var_timeout,
+                        self.var_cfg_outdir, self.var_template,
+                        self.var_cfg_toolkey, self.var_library):
+                var.trace_add("write", lambda *_: self.save_settings())
+            self._traced = True
+        if self._drain_id is None:
+            self._drain_id = self.app.after(120, self._drain_events)
+
+    def shutdown(self):
+        # The queue poller is rearmed every 120 ms. Without this, closing the
+        # window leaves one pending call that fires against a widget that is
+        # already gone.
+        self._cancel_preflight()
+        if self._drain_id is not None:
+            try:
+                self.app.after_cancel(self._drain_id)
+            except tk.TclError:
+                pass
+            self._drain_id = None
+
+    # ── small parts the flow is built from ──────────────────────────────────
+    def _file_row(self, parent, variable, on_browse, hint="", width=None,
+                  browse=None, mono=True):
+        """A well with a value in it and one button beside it."""
+        holder = tk.Frame(parent, bg=ui.BG)
+        row = tk.Frame(holder, bg=ui.BG)
+        row.pack(fill=tk.X)
+        field = ui.entry(row, variable, mono=mono)
+        field.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=ui.px(7))
+        if width:
+            field.configure(width=width)
+            field.pack_configure(expand=False)
+        ui.button(row, browse or t("word.choose"), on_browse, variant="secondary",
+                  size="md", bg=ui.BG).pack(side=tk.LEFT, padx=(ui.px(9), 0))
+        label = tk.Label(holder, text=hint, bg=ui.BG, fg=ui.TEXT_FAINT,
+                         font=ui.f("small"), anchor="w", justify="left")
+        label.pack(fill=tk.X, pady=(ui.px(7), 0))
+        ui.wrap_to_parent(label)
+        holder.hint = label
+        holder.entry = field
+        return holder
+
+    # ── Lock page ───────────────────────────────────────────────────────────
+    def _build_lock_page(self):
+        page = ui.Page(self.app.host, width=880)
+        self.lock_page = page
+
+        # Shown only while something global is still missing.
+        self.setup_card = ui.Card(page.body, title=t("setup.title"))
+        self.setup_msg = tk.Label(self.setup_card.body, text="", bg=ui.CARD,
+                                  fg=ui.TEXT_DIM, font=ui.f("small"), anchor="w",
+                                  justify="left", wraplength=ui.px(700))
+        self.setup_msg.pack(fill=tk.X)
+        ui.wrap_to_parent(self.setup_msg)
+        ui.button(self.setup_card.body, t("setup.open"),
+                  lambda: self.app.go("settings"), variant="secondary",
+                  size="sm").pack(anchor="e", pady=(ui.px(10), 0))
+
+        flow = ui.Flow(page.body)
+        flow.pack(fill=tk.X)
+        self.flow = flow
+
+        # ── 1 · the only file you have to pick ──────────────────────────────
+        step = flow.step(t("lock.step1"), state="now")
+        self.step_file = step
+        self.row_tuned = self._file_row(step.body, self.var_tuned, self._pick_tuned,
+                                        hint=t("lock.step1.hint"))
+        self.row_tuned.pack(fill=tk.X)
+
+        # ── 2 · what the tool found on its own ──────────────────────────────
+        step = flow.step(t("lock.step2"))
+        self.step_check = step
+        marks = tk.Frame(step.body, bg=ui.BG)
+        marks.pack(fill=tk.X)
+        self.res_tags = {}
+        for key in ("stock", "xdf", "toolkey", "builder"):
+            chip = ui.tag(marks, t(f"lock.step2.{key}"), "idle", bg=ui.BG)
+            chip.pack(side=tk.LEFT, padx=(0, ui.px(7)))
+            self.res_tags[key] = chip
+        self.manual = ui.Collapsible(step.body, t("lock.step2.manual"), bg=ui.BG)
+        self.manual.pack(fill=tk.X, pady=(ui.px(12), 0))
         for var, label, types, key in (
-                (self.var_stock, "Stock / original ROM (.bin)",
+                (self.var_stock, t("dlg.stock"),
                  [("ROM image", "*.bin *.org"), ("All files", "*.*")], "stock"),
-                (self.var_xdf, "XDF definition (.xdf)",
+                (self.var_xdf, t("dlg.xdf"),
                  [("TunerPro XDF", "*.xdf"), ("All files", "*.*")], "xdf"),
-                (self.var_toolkey, "MHD tool key (.toolkey)",
+                (self.var_toolkey, t("dlg.toolkey"),
                  [("MHD tool key", "*.toolkey"), ("All files", "*.*")], "toolkey")):
             ui.PathRow(self.manual.body, label, var,
-                       lambda v=var, l=label, t=types, k=key: self._pick_override(v, l, t, k)
-                       ).pack(fill=tk.X, pady=(8, 0))
+                       lambda v=var, l=label, ty=types, k=key:
+                       self._pick_override(v, l, ty, k), bg=ui.BG,
+                       browse_text=t("word.browse")).pack(fill=tk.X, pady=(ui.px(8), 0))
 
-        # ── 2 · the only thing you have to type ─────────────────────────────
-        step2 = page.card("Customer")
-        grid = tk.Frame(step2.body, bg=ui.CARD)
-        grid.pack(fill=tk.X)
-        self.var_vin = tk.StringVar()
-        ui.LabeledEntry(grid, "VIN (17 characters)", self.var_vin).grid(
-            row=0, column=0, sticky="ew", padx=(0, 14))
-        self.var_customer = tk.StringVar()
-        ui.LabeledEntry(grid, "Name (optional, used for the file name)",
-                        self.var_customer, mono=False).grid(row=0, column=1, sticky="ew")
-        grid.grid_columnconfigure(0, weight=1, uniform="c")
-        grid.grid_columnconfigure(1, weight=1, uniform="c")
-        self.lbl_vin = tk.Label(step2.body, text="", bg=ui.CARD, fg=ui.TEXT_FAINT,
+        # ── 3 · the only thing you have to type ─────────────────────────────
+        step = flow.step(t("lock.step3"))
+        self.step_vin = step
+        self.row_vin = self._file_row(step.body, self.var_vin, self._paste_vin,
+                                      hint=t("lock.step3.hint"), width=22,
+                                      browse=t("word.change"))
+        self.row_vin.pack(fill=tk.X)
+        self.row_vin.entry.configure(state="normal")
+        name = tk.Frame(step.body, bg=ui.BG)
+        name.pack(fill=tk.X, pady=(ui.px(12), 0))
+        ui.LabeledEntry(name, t("lock.step3.customer"), self.var_customer,
+                        bg=ui.BG, mono=False).pack(fill=tk.X)
+        self.lbl_vin = tk.Label(step.body, text="", bg=ui.BG, fg=ui.TEXT_FAINT,
                                 font=ui.f("small"), anchor="w")
-        self.lbl_vin.pack(fill=tk.X, pady=(8, 0))
+        self.lbl_vin.pack(fill=tk.X, pady=(ui.px(8), 0))
 
-        # ── everything else is out of the way ───────────────────────────────
-        self.details = ui.Collapsible(page.body, "Details and builder log", bg=ui.BG)
-        self.details.pack(fill=tk.X, pady=(0, 14))
-        detail_card = ui.Card(self.details.body, title=None)
-        detail_card.pack(fill=tk.BOTH, expand=True)
-        self.log = ui.LogView(detail_card.body, height=14)
+        # ── 4 · the action, and everything it says while it works ───────────
+        step = flow.step(t("lock.step4"))
+        self.step_run = step
+        self.lbl_run = tk.Label(step.body, text=t("lock.step4.hint"), bg=ui.BG,
+                                fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w",
+                                justify="left")
+        self.lbl_run.pack(fill=tk.X)
+        ui.wrap_to_parent(self.lbl_run)
+        self.log_holder = tk.Frame(step.body, bg=ui.BG)
+        self.log = ui.LogView(self.log_holder, height=11)
         self.log.pack(fill=tk.BOTH, expand=True)
-        tools = tk.Frame(detail_card.body, bg=ui.CARD)
-        tools.pack(fill=tk.X, pady=(10, 0))
-        ui.button(tools, "Save log", self._save_log, variant="secondary", size="sm",
-                  bg=ui.CARD).pack(side=tk.LEFT)
-        ui.button(tools, "Clear", self.log.clear, variant="ghost", size="sm",
-                  bg=ui.CARD).pack(side=tk.RIGHT)
-        ui.button(tools, "Re-check  ⟳", lambda: self._resolve_and_check(force=True),
-                  variant="ghost", size="sm", bg=ui.CARD).pack(side=tk.RIGHT, padx=(0, 8))
-        self.log.set_text("Pick a tuned file. The checks start on their own.", "dim")
+        tools = tk.Frame(self.log_holder, bg=ui.BG)
+        tools.pack(fill=tk.X, pady=(ui.px(9), 0))
+        ui.button(tools, t("word.save_log"), self._save_log, variant="secondary",
+                  size="sm", bg=ui.BG).pack(side=tk.LEFT)
+        ui.button(tools, t("word.clear"), self._clear_log, variant="ghost",
+                  size="sm", bg=ui.BG).pack(side=tk.RIGHT)
+        self.result_box = tk.Frame(step.body, bg=ui.BG)
 
-        self.var_summary = tk.StringVar(value="Waiting for a tuned file")
+        self.var_summary.set(t("status.waiting_file"))
         page.summary(self.var_summary)
         # Two ways out of this page, both always visible. Which one is the
-        # primary pill depends on the folder mode - see _apply_prepare_mode.
-        self.btn_lock = ui.button(page.action_row, "Lock now  🔒", self._on_lock,
-                                  variant="primary", size="lg")
+        # primary button depends on the folder mode, see _apply_prepare_mode.
+        self.btn_lock = ui.button(page.action_row, t("lock.btn.lock"), self._on_lock,
+                                  variant="primary", size="lg", bg=ui.SURFACE)
         self.btn_lock.pack(side=tk.RIGHT)
-        # No icon: the folder emoji is an outline glyph that all but disappears
-        # next to the solid padlock, and how Windows draws it is not ours to know.
-        self.btn_stage = ui.button(page.action_row, "Prepare folder",
-                                   self._on_stage_only, variant="secondary", size="lg")
-        self.btn_stage.pack(side=tk.RIGHT, padx=(0, 10))
-
-        self.var_tuned.trace_add("write", lambda *_: self._on_tuned_changed())
-        self.var_vin.trace_add("write", lambda *_: self._on_vin_typed())
-        self.var_customer.trace_add("write", lambda *_: self._schedule_preflight())
+        self.btn_stage = ui.button(page.action_row, t("lock.btn.prepare"),
+                                   self._on_stage_only, variant="secondary",
+                                   size="lg", bg=ui.SURFACE)
+        self.btn_stage.pack(side=tk.RIGHT, padx=(0, ui.px(10)))
         return page
 
+    def _clear_log(self):
+        self.log.clear()
+        self._hide_log()
+
+    def _show_log(self):
+        if not self._log_shown:
+            self.log_holder.pack(fill=tk.BOTH, expand=True, pady=(ui.px(12), 0))
+            self._log_shown = True
+
+    def _hide_log(self):
+        if self._log_shown:
+            self.log_holder.pack_forget()
+            self._log_shown = False
+
+    def _paste_vin(self):
+        """The VIN comes from the customer read; this is the way to correct it."""
+        self.row_vin.entry.focus_set()
+        self.row_vin.entry.select_range(0, tk.END)
+
+    # ── Batch page ──────────────────────────────────────────────────────────
+    def _build_batch_page(self):
+        page = ui.Page(self.app.host, width=940)
+        self.batch_page = page
+
+        flow = ui.Flow(page.body)
+        flow.pack(fill=tk.X)
+        self.batch_flow = flow
+
+        step = flow.step(t("batch.step1"), state="now")
+        self.step_files = step
+        self.batch_table = ui.Table(step.body, columns=[
+            {"key": "customer", "title": t("batch.col.customer"), "width": 150},
+            {"key": "vin", "title": t("batch.col.vin"), "width": 150},
+            {"key": "tuned", "title": t("batch.col.file"), "width": 250},
+            {"key": "status", "title": t("batch.col.status"), "width": 100},
+            {"key": "output", "title": t("batch.col.result"), "width": 190},
+        ], height=8)
+        self.batch_table.pack(fill=tk.BOTH, expand=True)
+        self.batch_table.tree.bind("<<TreeviewSelect>>",
+                                   lambda _e: self._batch_load_selected())
+        bar = tk.Frame(step.body, bg=ui.BG)
+        bar.pack(fill=tk.X, pady=(ui.px(11), 0))
+        ui.button(bar, t("batch.add_files"), self._batch_add_files,
+                  variant="secondary", size="sm", bg=ui.BG).pack(side=tk.LEFT)
+        ui.button(bar, t("batch.import_csv"), self._batch_import_csv,
+                  variant="secondary", size="sm", bg=ui.BG).pack(side=tk.LEFT,
+                                                                 padx=(ui.px(8), 0))
+        ui.button(bar, t("batch.export"), self._batch_export, variant="secondary",
+                  size="sm", bg=ui.BG).pack(side=tk.LEFT, padx=(ui.px(8), 0))
+        ui.button(bar, t("batch.clear"), self._batch_clear, variant="ghost",
+                  size="sm", bg=ui.BG).pack(side=tk.RIGHT)
+        ui.button(bar, t("batch.remove"), self._batch_remove, variant="ghost",
+                  size="sm", bg=ui.BG).pack(side=tk.RIGHT, padx=(0, ui.px(8)))
+
+        edit = tk.Frame(step.body, bg=ui.BG)
+        edit.pack(fill=tk.X, pady=(ui.px(14), 0))
+        grid = tk.Frame(edit, bg=ui.BG)
+        grid.pack(fill=tk.X)
+        ui.LabeledEntry(grid, t("batch.col.customer"), self.var_b_customer,
+                        bg=ui.BG, mono=False).grid(row=0, column=0, sticky="ew",
+                                                   padx=(0, ui.px(14)))
+        ui.LabeledEntry(grid, t("batch.col.vin"), self.var_b_vin, bg=ui.BG).grid(
+            row=0, column=1, sticky="ew")
+        grid.grid_columnconfigure(0, weight=1, uniform="b")
+        grid.grid_columnconfigure(1, weight=1, uniform="b")
+        apply_row = tk.Frame(edit, bg=ui.BG)
+        apply_row.pack(fill=tk.X, pady=(ui.px(10), 0))
+        self.lbl_batch_file = tk.Label(apply_row, text=t("batch.selected"), bg=ui.BG,
+                                       fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w")
+        self.lbl_batch_file.pack(side=tk.LEFT)
+        ui.button(apply_row, t("batch.apply"), self._batch_apply_edit,
+                  variant="secondary", size="sm", bg=ui.BG).pack(side=tk.RIGHT)
+        ui.button(apply_row, t("batch.vin_to_all"), self._batch_vin_to_all,
+                  variant="ghost", size="sm", bg=ui.BG).pack(side=tk.RIGHT,
+                                                             padx=(0, ui.px(8)))
+
+        step = flow.step(t("batch.step2"))
+        self.step_batch_check = step
+        self.batch_marks = tk.Frame(step.body, bg=ui.BG)
+        self.batch_marks.pack(fill=tk.X)
+        self.lbl_batch_check = tk.Label(step.body, text=t("batch.step2.idle"), bg=ui.BG,
+                                        fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w",
+                                        justify="left")
+        self.lbl_batch_check.pack(fill=tk.X)
+        ui.wrap_to_parent(self.lbl_batch_check)
+
+        step = flow.step(t("batch.step3"))
+        self.step_batch_run = step
+        hint = tk.Label(step.body, text=t("batch.step3.hint"), bg=ui.BG,
+                        fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w", justify="left")
+        hint.pack(fill=tk.X)
+        ui.wrap_to_parent(hint)
+        self.batch_log = ui.LogView(step.body, height=9)
+        self.batch_log.pack(fill=tk.BOTH, expand=True, pady=(ui.px(12), 0))
+
+        self.var_batch_summary.set(t("batch.step1.empty"))
+        page.summary(self.var_batch_summary)
+        self.btn_batch_run = ui.button(page.action_row, t("batch.btn.run"),
+                                       self._on_batch_run, variant="primary",
+                                       size="lg", bg=ui.SURFACE)
+        self.btn_batch_run.pack(side=tk.RIGHT)
+        self.btn_batch_stop = ui.button(page.action_row, t("word.stop"), self._on_stop,
+                                        variant="secondary", size="lg", bg=ui.SURFACE)
+        self.btn_batch_stop.pack(side=tk.RIGHT, padx=(0, ui.px(10)))
+        self.btn_batch_stop.config(state="disabled")
+        return page
+
+    # ── Settings ────────────────────────────────────────────────────────────
+    def build_settings(self, page):
+        def group(label):
+            block = ui.GroupedList(page.body, label)
+            block.pack(fill=tk.X, pady=(0, ui.px(20)))
+            return block
+
+        tools = group(t("settings.group.tools"))
+        row = tools.row()
+        ui.PathRow(row, t("settings.builder"), self.var_exe,
+                   lambda: self._pick_file(self.var_exe, t("dlg.builder"),
+                                           [("Programs", "*.exe"), ("All files", "*.*")]),
+                   browse_text=t("word.browse"),
+                   hint=t("settings.builder.hint")).pack(fill=tk.X)
+        row = tools.row()
+        ui.PathRow(row, t("settings.toolkey"), self.var_cfg_toolkey,
+                   lambda: self._pick_file(self.var_cfg_toolkey, t("dlg.toolkey"),
+                                           [("MHD tool key", "*.toolkey"),
+                                            ("All files", "*.*")]),
+                   browse_text=t("word.browse"),
+                   hint=t("settings.toolkey.hint")).pack(fill=tk.X)
+        row = tools.row()
+        ui.PathRow(row, t("settings.library"), self.var_library,
+                   lambda: self._pick_dir(self.var_library, t("dlg.library")),
+                   browse_text=t("word.choose"),
+                   hint=t("settings.library.hint")).pack(fill=tk.X)
+        opts = tools.row()
+        ui.LabeledEntry(opts, t("settings.args"), self.var_args).grid(
+            row=0, column=0, sticky="ew", padx=(0, ui.px(14)))
+        ui.LabeledEntry(opts, t("settings.timeout"), self.var_timeout,
+                        width=10).grid(row=0, column=1, sticky="ew")
+        opts.grid_columnconfigure(0, weight=3)
+        opts.grid_columnconfigure(1, weight=1)
+
+        flow = group(t("settings.group.flow"))
+        flow.switch_row(t("settings.prepare_only"), self.var_prepare_only,
+                        t("settings.prepare_only.hint"), command=self.save_settings)
+        flow.switch_row(t("settings.copy_builder"), self.var_copy_builder,
+                        t("settings.copy_builder.hint"), command=self.save_settings)
+        flow.switch_row(t("settings.pass_workdir"), self.var_pass_workdir,
+                        t("settings.pass_workdir.hint"), command=self.save_settings)
+        flow.switch_row(t("settings.keep_staging"), self.var_keep_staging,
+                        t("settings.keep_staging.hint"), command=self.save_settings)
+
+        target = group(t("settings.group.target"))
+        row = target.row()
+        ui.PathRow(row, t("settings.output"), self.var_cfg_outdir,
+                   lambda: self._pick_dir(self.var_cfg_outdir, t("dlg.output")),
+                   browse_text=t("word.choose"),
+                   hint=t("settings.output.hint")).pack(fill=tk.X)
+        holder = target.row()
+        ui.LabeledEntry(holder, t("settings.name_template"), self.var_template).pack(fill=tk.X)
+        tokens = tk.Label(holder, text=t("settings.name_template.hint",
+                                         tokens=NAME_TOKENS),
+                          bg=ui.CARD, fg=ui.TEXT_FAINT, font=ui.f("small"),
+                          anchor="w", justify="left")
+        tokens.pack(fill=tk.X, pady=(ui.px(6), 0))
+        ui.wrap_to_parent(tokens)
+        target.switch_row(t("settings.open_after"), self.var_open_after,
+                          command=self.save_settings)
+
+    def bind_settings_summary(self, variable):
+        self.var_settings_summary = variable
+        variable.set(t("settings.saved"))
+
+    # ── which step is where ─────────────────────────────────────────────────
+    def _paint_steps(self, outcome=None, report=None):
+        """Set the four rings from what is actually known right now."""
+        tuned = self.var_tuned.get().strip()
+        has_file = bool(tuned) and os.path.isfile(tuned)
+        found = all(self._resolved(key) for key in ("stock", "xdf", "toolkey"))
+        vin_ok = validate_vin(self.var_vin.get())[0]
+        # A missing VIN is step 3's business, not step 2's, so it is taken out
+        # of the pre-flight before the ring is painted.
+        blocking = [i for i in (report.errors if report else []) if i.topic != "vin"]
+        checked = report is not None and not blocking
+
+        self.step_file.set_state("done" if has_file else "now")
+        if not has_file:
+            self.step_check.set_state("next")
+        elif blocking:
+            self.step_check.set_state("err")
+        elif checked and found:
+            self.step_check.set_state("done")
+        else:
+            self.step_check.set_state("now")
+        if not has_file or self.step_check.state in ("next", "err"):
+            self.step_vin.set_state("next")
+        else:
+            self.step_vin.set_state("done" if vin_ok else "now")
+        ready = (self.step_check.state == "done" and self.step_vin.state == "done"
+                 and report is not None and report.ok)
+        if outcome == "ok":
+            self.step_run.set_state("done")
+        elif outcome == "err":
+            self.step_run.set_state("err")
+        else:
+            self.step_run.set_state("now" if ready else "next")
+
+    def _resolved(self, key):
+        path = getattr(self, f"var_{key}").get().strip()
+        return bool(path) and os.path.isfile(path)
+
     def _on_vin_typed(self):
-        """A VIN is upper case and has no spaces - the file name must match exactly."""
+        """A VIN is upper case and has no spaces, the file name must match exactly."""
         raw = self.var_vin.get()
         clean = normalise_vin(raw)
         if clean != raw:
@@ -1534,11 +1794,10 @@ class MhdLockTool(_TkBase):
             self._vin_auto = False    # typed by hand: the app stops correcting it
         self._schedule_preflight()
 
-    # ── automatic resolution ─────────────────────────────────────────────────
-
+    # ── automatic resolution ────────────────────────────────────────────────
     def _pick_tuned(self):
         path = filedialog.askopenfilename(
-            title="Select the tuned ROM",
+            title=t("dlg.tuned"),
             filetypes=[("ROM image", "*.bin"), ("All files", "*.*")],
             initialdir=os.path.dirname(self.var_tuned.get()) or None)
         if path:
@@ -1553,7 +1812,7 @@ class MhdLockTool(_TkBase):
             if key == "stock" and not self.var_vin.get().strip():
                 vin, _ = parse_customer_read(path)
                 if vin:
-                    self.var_vin.set(vin)   # the customer's read carries the VIN
+                    self.var_vin.set(vin)   # the customer read carries the VIN
             self._schedule_preflight()
 
     def _on_tuned_changed(self):
@@ -1575,6 +1834,15 @@ class MhdLockTool(_TkBase):
         finally:
             self._setting_vin = False
 
+    def _mark(self, key, ok, detail=""):
+        chip = self.res_tags.get(key)
+        if chip is None:
+            return
+        fg, bg = (ui.OK, ui.OK_BG) if ok else (ui.TEXT_DIM, ui.HOVER)
+        chip.set_text(("\u2713  " if ok else "") + t(f"lock.step2.{key}")
+                      + (f"  {detail}" if detail else ""))
+        chip.set_fill(bg, fg)
+
     def _resolve_and_check(self, force=False):
         """Derive every companion file from the tuned ROM, then run the checks."""
         self._cancel_preflight()
@@ -1584,22 +1852,28 @@ class MhdLockTool(_TkBase):
 
         tuned = self.var_tuned.get().strip()
         if not tuned or not os.path.isfile(tuned):
-            for row in self.res_rows.values():
-                row.set("", "", ok=False)
-            self.row_tuned.set_hint("Everything else is derived from this file")
-            self.var_summary.set("Waiting for a tuned file")
-            if force:
-                self.log.set_text("Pick a tuned file first.", "warn")
+            for key in ("stock", "xdf", "toolkey"):
+                self._mark(key, False)
+            self._mark("builder", bool(self.config_data.get("builder_exe")
+                                       and os.path.isfile(self.config_data["builder_exe"])))
+            self.row_tuned.hint.configure(text=t("lock.step1.hint"), fg=ui.TEXT_FAINT)
+            self.var_summary.set(t("status.waiting_file"))
+            self.step_check.set_note("")
+            self._paint_steps()
             return
 
         size = os.path.getsize(tuned)
-        self.row_tuned.set_hint(f"{os.path.basename(tuned)} · {human_size(size)}", "ok")
+        when = datetime.datetime.fromtimestamp(os.path.getmtime(tuned))
+        self.row_tuned.hint.configure(
+            text=t("lock.step1.size", size=human_size(size), when=f"{when:%d.%m.%Y %H:%M}"),
+            fg=ui.OK)
 
         try:
             found = resolve_inputs(tuned, self.config_data.get("library_dir", ""),
                                    self.config_data.get("toolkey", ""))
         except OSError as exc:
-            self.log.set_text(f"Could not read the file: {exc}", "error")
+            self._show_log()
+            self.log.set_text(str(exc), "error")
             return
 
         for key in ("stock", "xdf", "toolkey"):
@@ -1611,290 +1885,115 @@ class MhdLockTool(_TkBase):
             if found.vin != self.var_vin.get():
                 self._set_vin(found.vin)
             self._vin_auto = True
+
         if found.rom_id:
-            self._step1.set_hint(f"ROM {found.rom_id}", "ok")
-
-        for key, label in (("stock", "Stock ROM"), ("xdf", "XDF"), ("toolkey", "Tool key")):
+            self.step_file.set_note(f"ROM {found.rom_id}")
+        for key in ("stock", "xdf", "toolkey"):
             path = getattr(self, f"var_{key}").get().strip()
-            source = "chosen manually" if key in self._manual else found.source(key)
-            self.res_rows[key].set(os.path.basename(path) if path else "", source,
-                                   ok=bool(path) and os.path.isfile(path))
+            self._mark(key, bool(path) and os.path.isfile(path),
+                       os.path.basename(path) if key == "xdf" and path else "")
+        exe = self.config_data.get("builder_exe", "")
+        self._mark("builder", bool(exe) and os.path.isfile(exe))
 
-        missing = [k for k in ("stock", "xdf", "toolkey")
-                   if not getattr(self, f"var_{k}").get().strip()]
-        if missing:
-            self.manual.set_title(f"Change manually · {len(missing)} file(s) not found")
-        else:
-            self.manual.set_title("Change manually")
+        missing = [k for k in ("stock", "xdf", "toolkey") if not self._resolved(k)]
+        self.manual.set_title(t("lock.step2.manual") +
+                              (f"  ({len(missing)} {t('word.missing')})" if missing else ""))
         for note in found.notes:
+            self._show_log()
             self.log.write(f" ! {note}", "warn")
-
         self._run_preflight()
 
     def _update_setup_hint(self):
         """The setup card only exists while something global is still missing."""
         problems = missing_setup(self.config_data, self.var_toolkey.get())
         if problems:
-            self.setup_msg.config(text="Still missing: " + " and ".join(problems) +
-                                       ". Set it once under Settings. After that every "
-                                       "job needs nothing but the tuned file and the VIN.")
-            if not self.setup_card.winfo_ismapped():
-                self.setup_card.pack(fill=tk.X, pady=(0, 14), before=self._step1)
-        elif self.setup_card.winfo_ismapped():
+            self.setup_msg.config(text=t("setup.body", what=", ".join(
+                t(f"setup.what.{key}") for key in problems)))
+            if not self.setup_card.winfo_manager():
+                self.setup_card.pack(fill=tk.X, pady=(0, ui.px(18)),
+                                     before=self.flow)
+        elif self.setup_card.winfo_manager():
             self.setup_card.pack_forget()
 
-    # ── Pre-flight ───────────────────────────────────────────────────────────
-
+    # ── Pre-flight ──────────────────────────────────────────────────────────
     def _cancel_preflight(self):
         if self._preflight_after:
-            self.after_cancel(self._preflight_after)
+            try:
+                self.app.after_cancel(self._preflight_after)
+            except tk.TclError:
+                pass
             self._preflight_after = None
 
     def _schedule_preflight(self):
-        self._save_settings()
+        self.save_settings()
         self._cancel_preflight()
         if self._running:
             return
-        self._preflight_after = self.after(350, self._resolve_and_check)
+        self._preflight_after = self.app.after(350, self._resolve_and_check)
 
     def _run_preflight(self):
         job = self._current_job()
         ok_vin, vin, vin_msg = validate_vin(job.vin)
-        self.lbl_vin.config(text=("✓  " if ok_vin else "✕  ") + vin_msg,
+        self.lbl_vin.config(text=("\u2713  " if ok_vin else "\u2715  ") + vin_msg,
                             fg=ui.OK if ok_vin else (ui.TEXT_FAINT if not job.vin else ui.ERR))
         if not (job.stock_bin and job.tuned_bin and os.path.isfile(job.stock_bin)
                 and os.path.isfile(job.tuned_bin)):
-            self.var_summary.set("Stock ROM not found. Pick it under Details")
+            self.var_summary.set(t("lock.step2.idle"))
+            self._paint_steps()
             return None
         report = preflight(job, self._definition(job.xdf))
         self._render_preflight(report, job)
         return report
 
     def _render_preflight(self, report: Preflight, job: LockJob):
+        self._show_log()
         self.log.clear()
         self.log.write("PRE-FLIGHT CHECKS", "dim")
-        self.log.write("─" * 62, "dim")
+        self.log.write("\u2500" * 62, "dim")
         for issue in report.issues:
             tag = {"error": "error", "warn": "warn"}.get(issue.level, "info")
-            mark = {"error": "✕", "warn": "!", "info": "·"}[issue.level]
+            mark = {"error": "\u2715", "warn": "!", "info": "\u00b7"}[issue.level]
             self.log.write(f" {mark} {issue.text}", tag)
         if report.regions:
             definition = self._definition(job.xdf)
             self.log.write("")
             self.log.write(f"MODIFIED REGIONS ({len(report.regions)})", "dim")
-            self.log.write("─" * 62, "dim")
+            self.log.write("\u2500" * 62, "dim")
             for start, length in report.regions[:25]:
                 names = definition.tables_at(start, length, report.file_size) if definition else []
                 label = ", ".join(names[:2]) if names else "not in this XDF"
                 self.log.write(f"  0x{start:07X}  {length:>6,} B   {label[:64]}",
                                "accent" if names else "warn")
             if len(report.regions) > 25:
-                self.log.write(f"  … and {len(report.regions) - 25} more region(s)", "dim")
+                self.log.write(f"  \u2026 and {len(report.regions) - 25} more region(s)", "dim")
         if report.touched_tables:
             self.log.write("")
             self.log.write(f"TABLES TOUCHED ({len(report.touched_tables)})", "dim")
-            self.log.write("─" * 62, "dim")
+            self.log.write("\u2500" * 62, "dim")
             for name in report.touched_tables[:20]:
-                self.log.write(f"  · {name[:70]}")
+                self.log.write(f"  \u00b7 {name[:70]}")
             if len(report.touched_tables) > 20:
-                self.log.write(f"  … and {len(report.touched_tables) - 20} more", "dim")
+                self.log.write(f"  \u2026 and {len(report.touched_tables) - 20} more", "dim")
         self.log.scroll_top()
 
         if report.ok:
-            self.details.set_title("Details and builder log")
-            self.var_summary.set(f"{report.changed_bytes:,} byte(s) changed · "
-                                 f"{len(report.touched_tables)} table(s) · ready")
-            self.status.set("Ready to prepare"
-                            if self.config_data.get("prepare_only", False)
-                            else "Ready to lock", "ok")
+            note = t("lock.step2.note", bytes=f"{report.changed_bytes:,}".replace(",", "."),
+                     tables=len(report.touched_tables))
+            self.step_check.set_note(note)
+            self.var_summary.set(note)
+            self.app.set_status(t("status.ready_prepare")
+                                if self.config_data.get("prepare_only", False)
+                                else t("status.ready"), "ok")
         else:
-            self.details.set_title(f"Details and builder log · {len(report.errors)} problem(s)")
-            self.var_summary.set(report.errors[0].text if report.errors else "Checks failed")
-            self.status.set("Check failed", "error")
+            blocking = [i for i in report.errors if i.topic != "vin"]
+            first = (blocking or report.errors)[0].text
+            self.step_check.set_note(first[:70] if blocking else "", "error")
+            self.var_summary.set(first)
+            self.app.set_status(t("status.blocked"), "error")
+        self._paint_steps(report=report)
         return report
 
-    # ── Batch page ───────────────────────────────────────────────────────────
-
-    def _build_batch_page(self):
-        page = ui.Page(self._host)
-        self.batch_page = page
-
-        queue_card = page.card("Job queue", hint="0 jobs")
-        self.batch_card = queue_card
-        bar = tk.Frame(queue_card.body, bg=ui.CARD)
-        bar.pack(fill=tk.X, pady=(0, 12))
-        ui.button(bar, "Add tuned files…", self._batch_add_files,
-                  variant="secondary", size="sm").pack(side=tk.LEFT)
-        ui.button(bar, "Import CSV…", self._batch_import_csv,
-                  variant="secondary", size="sm").pack(side=tk.LEFT, padx=(8, 0))
-        ui.button(bar, "Export report…", self._batch_export,
-                  variant="secondary", size="sm").pack(side=tk.LEFT, padx=(8, 0))
-        ui.button(bar, "Clear", self._batch_clear, variant="ghost", size="sm",
-                  bg=ui.CARD).pack(side=tk.RIGHT)
-        ui.button(bar, "Remove selected", self._batch_remove, variant="ghost", size="sm",
-                  bg=ui.CARD).pack(side=tk.RIGHT, padx=(0, 8))
-
-        self.batch_table = ui.Table(queue_card.body, columns=[
-            {"key": "customer", "title": "Customer", "width": 170},
-            {"key": "vin", "title": "VIN", "width": 160},
-            {"key": "tuned", "title": "Tuned file", "width": 260},
-            {"key": "status", "title": "Status", "width": 110},
-            {"key": "output", "title": "Result", "width": 220},
-        ], height=9)
-        self.batch_table.pack(fill=tk.BOTH, expand=True)
-        self.batch_table.tree.bind("<<TreeviewSelect>>", lambda _e: self._batch_load_selected())
-
-        edit = page.card("Selected job")
-        grid = tk.Frame(edit.body, bg=ui.CARD)
-        grid.pack(fill=tk.X)
-        self.var_b_customer = tk.StringVar()
-        self.var_b_vin = tk.StringVar()
-        ui.LabeledEntry(grid, "Customer", self.var_b_customer, mono=False).grid(
-            row=0, column=0, sticky="ew", padx=(0, 14))
-        ui.LabeledEntry(grid, "VIN", self.var_b_vin).grid(row=0, column=1, sticky="ew")
-        grid.grid_columnconfigure(0, weight=1, uniform="b")
-        grid.grid_columnconfigure(1, weight=1, uniform="b")
-        apply_row = tk.Frame(edit.body, bg=ui.CARD)
-        apply_row.pack(fill=tk.X, pady=(10, 0))
-        self.lbl_batch_file = tk.Label(apply_row, text="No job selected", bg=ui.CARD,
-                                       fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w")
-        self.lbl_batch_file.pack(side=tk.LEFT)
-        ui.button(apply_row, "Apply to selected", self._batch_apply_edit,
-                  variant="secondary", size="sm").pack(side=tk.RIGHT)
-        ui.button(apply_row, "VIN to all", self._batch_vin_to_all, variant="ghost",
-                  size="sm", bg=ui.CARD).pack(side=tk.RIGHT, padx=(0, 8))
-
-        log_card = page.card("Batch log")
-        self.batch_log = ui.LogView(log_card.body, height=10)
-        self.batch_log.pack(fill=tk.BOTH, expand=True)
-        self.batch_log.set_text("Add tuned files or import a CSV to build the queue.", "dim")
-
-        self.var_batch_summary = tk.StringVar(value="Queue is empty")
-        page.summary(self.var_batch_summary)
-        self.btn_batch_run = ui.button(page.action_row, "Run batch  ▶", self._on_batch_run,
-                                       variant="primary", size="lg")
-        self.btn_batch_run.pack(side=tk.RIGHT)
-        self.btn_batch_stop = ui.button(page.action_row, "Stop", self._on_stop,
-                                        variant="secondary", size="lg")
-        self.btn_batch_stop.pack(side=tk.RIGHT, padx=(0, 10))
-        self.btn_batch_stop.config(state="disabled")
-        return page
-
-    # ── Settings page ────────────────────────────────────────────────────────
-
-    def _build_settings_page(self):
-        page = ui.Page(self._host)
-
-        def group(label):
-            block = ui.GroupedList(page.body, label)
-            block.pack(fill=tk.X, pady=(0, 18))
-            return block
-
-        builder = group("MHD MAP BUILDER")
-        self.var_exe = tk.StringVar()
-        ui.PathRow(builder.row(), "Path to the builder executable", self.var_exe,
-                   lambda: self._pick_file(self.var_exe, "Select the MHD map builder",
-                                           [("Programs", "*.exe"), ("All files", "*.*")]),
-                   ).pack(fill=tk.X)
-        opts = builder.row()
-        self.var_args = tk.StringVar()
-        ui.LabeledEntry(opts, "Extra command line arguments, usually empty",
-                        self.var_args).grid(row=0, column=0, sticky="ew", padx=(0, 14))
-        self.var_timeout = tk.StringVar()
-        ui.LabeledEntry(opts, "Timeout per job, seconds", self.var_timeout,
-                        width=10).grid(row=0, column=1, sticky="ew")
-        opts.grid_columnconfigure(0, weight=3)
-        opts.grid_columnconfigure(1, weight=1)
-        self.var_copy_builder = tk.BooleanVar()
-        self.var_pass_workdir = tk.BooleanVar()
-        self.var_prepare_only = tk.BooleanVar()
-        builder.switch_row("Copy the builder into the working folder",
-                           self.var_copy_builder,
-                           "Mirrors a folder you built by hand, so the builder always sees "
-                           "the right files, and it is the copy that runs when this app "
-                           "runs it.", command=self._save_settings)
-        builder.switch_row("Pass the working folder as a command line argument",
-                           self.var_pass_workdir,
-                           "Only needed if your build of the tool expects a path argument.",
-                           command=self._save_settings)
-        builder.switch_row("I convert to .mhd myself, only prepare the folder",
-                           self.var_prepare_only,
-                           "Preparing the folder becomes the main action and the builder is "
-                           "never started. Its path stays useful: it puts the .exe into the "
-                           "folder so you can run it there.", command=self._save_settings)
-
-        yours = group("YOUR FILES, SET ONCE AND USED FOR EVERY JOB")
-        self.var_cfg_toolkey = tk.StringVar()
-        ui.PathRow(yours.row(), "MHD tool key (.toolkey)", self.var_cfg_toolkey,
-                   lambda: self._pick_file(self.var_cfg_toolkey, "Select your .toolkey",
-                                           [("MHD tool key", "*.toolkey"),
-                                            ("All files", "*.*")]),
-                   hint="Stays on this machine. Only copied into the temporary "
-                        "working folder.").pack(fill=tk.X)
-        self.var_library = tk.StringVar()
-        ui.PathRow(yours.row(), "Folder with your XDFs and stock ROMs, optional",
-                   self.var_library,
-                   lambda: self._pick_dir(self.var_library, "Select the folder"),
-                   browse_text="Choose",
-                   hint="Only needed when stock ROM and XDF are not stored next to the "
-                        "tuned file. Subfolders are searched, matched by ROM id."
-                   ).pack(fill=tk.X)
-
-        output = group("OUTPUT")
-        self.var_cfg_outdir = tk.StringVar()
-        ui.PathRow(output.row(), "Default output folder", self.var_cfg_outdir,
-                   lambda: self._pick_dir(self.var_cfg_outdir, "Select the default output folder"),
-                   browse_text="Choose").pack(fill=tk.X)
-        holder = output.row()
-        self.var_template = tk.StringVar()
-        ui.LabeledEntry(holder, "File name template", self.var_template).pack(fill=tk.X)
-        tokens = tk.Label(holder, text=f"Tokens: {NAME_TOKENS}   ·   "
-                                       "{source} keeps the name the builder produced",
-                          bg=ui.CARD, fg=ui.TEXT_FAINT, font=ui.f("small"),
-                          anchor="w", justify="left")
-        tokens.pack(fill=tk.X, pady=(6, 0))
-        ui.wrap_to_parent(tokens)
-        self.var_open_after = tk.BooleanVar()
-        output.switch_row("Open the output folder after a successful lock",
-                          self.var_open_after, command=self._save_settings)
-
-        advanced = group("ADVANCED")
-        self.var_keep_staging = tk.BooleanVar()
-        advanced.switch_row("Keep the temporary working folder after the run",
-                            self.var_keep_staging,
-                            "Useful when you want to inspect exactly what the builder saw.",
-                            command=self._save_settings)
-        actions = advanced.row()
-        ui.button(actions, "Open settings file location",
-                  lambda: ui.reveal_in_file_manager(config_path()),
-                  variant="ghost", size="sm", bg=ui.CARD).pack(side=tk.LEFT)
-        ui.button(actions, "Reset to defaults", self._reset_settings,
-                  variant="ghost", size="sm", bg=ui.CARD).pack(side=tk.RIGHT)
-
-        self.var_settings_summary = tk.StringVar(value="Settings are saved automatically")
-        page.summary(self.var_settings_summary)
-        ui.button(page.action_row, "Save now", self._save_settings,
-                  variant="secondary", size="lg").pack(side=tk.RIGHT)
-        return page
-
-    def _checkbox(self, parent, text, variable, hint=None):
-        holder = tk.Frame(parent, bg=ui.CARD)
-        holder.pack(fill=tk.X, pady=(2, 6))
-        box = tk.Checkbutton(holder, text=text, variable=variable, bg=ui.CARD, fg=ui.TEXT,
-                             selectcolor=ui.FIELD, activebackground=ui.CARD,
-                             activeforeground=ui.TEXT, font=ui.f("small"), bd=0,
-                             highlightthickness=0, anchor="w", cursor="hand2",
-                             command=self._save_settings)
-        box.pack(fill=tk.X)
-        if hint:
-            label = tk.Label(holder, text=hint, bg=ui.CARD, fg=ui.TEXT_FAINT,
-                             font=ui.f("small"), anchor="w", justify="left")
-            label.pack(fill=tk.X, padx=(22, 0))
-            ui.wrap_to_parent(label, inset=ui.px(30))
-        return box
-
-    # ── Settings plumbing ────────────────────────────────────────────────────
-
+    # ── Settings plumbing ───────────────────────────────────────────────────
     def _restore_settings(self):
         cfg = self.config_data
         self.var_exe.set(cfg.get("builder_exe", ""))
@@ -1910,11 +2009,6 @@ class MhdLockTool(_TkBase):
         self.var_cfg_toolkey.set(cfg.get("toolkey", ""))
         self.var_library.set(cfg.get("library_dir", ""))
         self.var_customer.set(cfg.get("last_customer", ""))
-        for var in (self.var_exe, self.var_args, self.var_timeout, self.var_cfg_outdir,
-                    self.var_template, self.var_cfg_toolkey, self.var_library):
-            var.trace_add("write", lambda *_: self._save_settings())
-        self._update_setup_hint()
-        self._apply_prepare_mode()
 
     def _collect_settings(self) -> dict:
         try:
@@ -1935,16 +2029,27 @@ class MhdLockTool(_TkBase):
             "toolkey": self.var_cfg_toolkey.get().strip(),
             "library_dir": self.var_library.get().strip(),
             "last_customer": self.var_customer.get().strip(),
+            "language": self.config_data.get("language", DEFAULT_CONFIG["language"]),
         }
 
-    def _save_settings(self):
-        self.config_data = self._collect_settings()
+    def save_settings(self):
+        self.config_data.update(self._collect_settings())
+        self.app.config_data = self.config_data
         ok = save_config(self.config_data)
-        self.var_settings_summary.set("Saved automatically" if ok
-                                      else "Could not write the settings file")
+        self.var_settings_summary.set(t("settings.saved") if ok
+                                      else t("settings.save_failed"))
         if hasattr(self, "setup_card"):
             self._update_setup_hint()
         self._apply_prepare_mode()
+
+    def reset_settings(self):
+        self.config_data.clear()
+        self.config_data.update(DEFAULT_CONFIG)
+        save_config(self.config_data)
+        self._restore_settings()
+        self._update_setup_hint()
+        self._apply_prepare_mode()
+        self.app.set_status(t("settings.saved"), "info")
 
     def _apply_prepare_mode(self):
         """Folder mode moves the weight from locking to preparing.
@@ -1956,8 +2061,10 @@ class MhdLockTool(_TkBase):
             return
         prepare = bool(self.config_data.get("prepare_only", False))
         self.btn_stage.set_variant("primary" if prepare else "secondary")
-        # winfo_ismapped() is false for everything on a page that is not on
-        # screen, so it cannot answer "is this button packed?" - winfo_manager can.
+        self.btn_stage.configure(text=t("lock.btn.prepare_main") if prepare
+                                 else t("lock.btn.prepare"))
+        # winfo_ismapped() cannot answer "is this button packed?" for a page
+        # that is not on top; winfo_manager can.
         packed = bool(self.btn_lock.winfo_manager())
         if prepare and packed:
             self.btn_lock.pack_forget()
@@ -1965,22 +2072,19 @@ class MhdLockTool(_TkBase):
         elif not prepare and not packed:
             self.btn_lock.pack(side=tk.RIGHT)
             self.btn_stage.pack_forget()
-            self.btn_stage.pack(side=tk.RIGHT, padx=(0, 10))
+            self.btn_stage.pack(side=tk.RIGHT, padx=(0, ui.px(10)))
         if hasattr(self, "btn_batch_run"):
-            self.btn_batch_run.configure(
-                text="Prepare folders" if prepare else "Run batch  ▶")
-        self.shell.set_subtitle("lock", PREPARE_SUBTITLE if prepare else LOCK_SUBTITLE)
-        self.shell.set_subtitle("batch", BATCH_PREPARE_SUBTITLE if prepare
-                                else BATCH_SUBTITLE)
+            self.btn_batch_run.configure(text=t("batch.btn.prepare") if prepare
+                                         else t("batch.btn.run"))
+        if hasattr(self, "lbl_run"):
+            self.lbl_run.configure(text=t("lock.step4.hint_prepare") if prepare
+                                   else t("lock.step4.hint"))
+        self.step_run.set_title(t("lock.step4"))
+        shell = self.app.shell
+        shell.set_subtitle("lock", t("lock.sub_prepare") if prepare else t("lock.sub"))
+        shell.set_subtitle("batch", t("batch.sub_prepare") if prepare else t("batch.sub"))
 
-    def _reset_settings(self):
-        self.config_data = dict(DEFAULT_CONFIG)
-        save_config(self.config_data)
-        self._restore_settings()
-        self.status.set("Settings reset to defaults", "info")
-
-    # ── Input helpers ────────────────────────────────────────────────────────
-
+    # ── Input helpers ───────────────────────────────────────────────────────
     def _pick_file(self, variable, title, filetypes):
         initial = os.path.dirname(variable.get()) if variable.get() else ""
         path = filedialog.askopenfilename(title=title, filetypes=filetypes,
@@ -2020,8 +2124,7 @@ class MhdLockTool(_TkBase):
         self._xdf_cache = (path, stamp, definition)
         return definition
 
-    # ── Running ──────────────────────────────────────────────────────────────
-
+    # ── Running ─────────────────────────────────────────────────────────────
     def _busy(self, busy: bool):
         self._running = busy
         if busy:
@@ -2033,39 +2136,41 @@ class MhdLockTool(_TkBase):
 
     def _on_stop(self):
         self._stop_event.set()
-        self.status.set("Stopping after the current job…", "warn")
+        self.app.set_status(t("status.stopped"), "warn")
 
     def _on_lock(self):
         job = self._current_job()
         report = preflight(job, self._definition(job.xdf))
         self._render_preflight(report, job)
         if not report.ok:
-            self.lock_page.banner.show("error", "Pre-flight failed. Fix the points above first.")
+            self.lock_page.banner.show("error", t("status.blocked"))
             return
         exe = self.config_data.get("builder_exe", "")
         if not exe or not os.path.isfile(exe):
-            self.lock_page.banner.show(
-                "error", "No MHD map builder configured. Set its path in the Settings tab.",
-                action_text="Open settings", action=lambda: self.tabs.select("settings"))
+            self.lock_page.banner.show("error", t("setup.body",
+                                                  what=t("setup.what.builder")),
+                                       action_text=t("setup.open"),
+                                       action=lambda: self.app.go("settings"))
             return
-        self.lock_page.banner.show("busy", f"Locking {os.path.basename(job.tuned_bin)}…")
+        self.lock_page.banner.show("busy", t("status.locking"))
+        self.step_run.set_state("now")
         self._start([job], target="lock")
 
     def _save_log(self):
-        """Write the panel's text to a file, so a failed run can be handed on.
+        """Write the panel text to a file, so a failed run can be handed on.
 
         A failed lock leaves no .log next to an output, because there is no
         output. Without this the only way to pass on what the builder said is a
         photograph of the screen.
         """
-        text = self.log.text.get("1.0", tk.END).rstrip()
-        if not text:
-            self.lock_page.banner.show("info", "The log is empty.")
+        text_body = self.log.text.get("1.0", tk.END).rstrip()
+        if not text_body:
+            self.lock_page.banner.show("info", t("log.empty"))
             return
         job = self._current_job()
         stem = safe_name(job.label, "mhd") or "mhd"
         target = filedialog.asksaveasfilename(
-            title="Save the log", defaultextension=".log",
+            title=t("dlg.save_log"), defaultextension=".log",
             initialfile=f"{stem}_{datetime.datetime.now():%Y%m%d_%H%M}.log",
             initialdir=job.output_dir or None,
             filetypes=[("Log file", "*.log"), ("All files", "*.*")])
@@ -2073,7 +2178,7 @@ class MhdLockTool(_TkBase):
             return
         try:
             with open(target, "w", encoding="utf-8") as handle:
-                handle.write(f"{APP_NAME} v{APP_VERSION} · {brand.VENDOR}\n")
+                handle.write(f"{APP_NAME} v{APP_VERSION} \u00b7 {brand.VENDOR}\n")
                 handle.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S}\n\n")
                 handle.write(f"Tuned    : {job.tuned_bin}\n")
                 handle.write(f"Stock    : {job.stock_bin}\n")
@@ -2081,12 +2186,13 @@ class MhdLockTool(_TkBase):
                 handle.write(f"Tool key : {job.toolkey}\n")
                 handle.write(f"VIN      : {job.vin}\n")
                 handle.write(f"Builder  : {self.config_data.get('builder_exe', '')}\n\n")
-                handle.write(text + "\n")
+                handle.write(text_body + "\n")
         except OSError as exc:
-            self.lock_page.banner.show("error", f"Could not write the log: {exc}")
+            self.lock_page.banner.show("error", str(exc))
             return
-        self.lock_page.banner.show("ok", f"Log saved:\n{target}",
-                                   action_text="Show in folder",
+        self.lock_page.banner.show("ok", t("banner.log_saved",
+                                           name=os.path.basename(target)),
+                                   action_text=t("word.open_folder"),
                                    action=lambda: ui.reveal_in_file_manager(target))
 
     def _on_stage_only(self):
@@ -2095,45 +2201,47 @@ class MhdLockTool(_TkBase):
         report = preflight(job, self._definition(job.xdf))
         self._render_preflight(report, job)
         if not report.ok:
-            self.lock_page.banner.show("error", "Pre-flight failed. Fix the points above first.")
+            self.lock_page.banner.show("error", t("status.blocked"))
             return
         try:
             manifest = prepare_folder(job, self.config_data)
         except OSError as exc:
-            self.lock_page.banner.show("error", f"Could not prepare the folder: {exc}")
+            self.lock_page.banner.show("error", str(exc))
             return
         workdir = manifest["workdir"]
+        self._show_log()
         self.log.write("")
-        self.log.write(f"Working folder prepared: {workdir}", "ok")
+        self.log.write(f"{t('log.folder')}: {workdir}", "ok")
         for key in ("stock", "tuned", "xdf", "toolkey", "vin_file"):
             self.log.write(f"    {manifest[key]}", "dim")
         if manifest["builder"]:
             self.log.write(f"    {os.path.basename(manifest['builder'])}", "dim")
-        else:
-            self.log.write("    (no map builder in the folder. Set its path under "
-                           "Settings to have it copied in)", "warn")
-        self.lock_page.banner.show("ok", f"Working folder ready:\n{workdir}",
-                                   action_text="Show in folder",
+        self.lock_page.banner.show("ok", t("banner.prepared"),
+                                   action_text=t("word.open_folder"),
                                    action=lambda: ui.reveal_in_file_manager(workdir))
-        self.status.set("Working folder prepared", "ok")
+        self._last_output = workdir
+        self.step_run.set_state("done")
+        self.step_run.set_note(os.path.basename(workdir))
+        self.app.set_status(t("word.done"), "ok")
 
     def _on_batch_run(self):
         if not self.batch_jobs:
-            self.batch_page.banner.show("error", "The queue is empty.")
+            self.batch_page.banner.show("error", t("err.no_jobs"))
             return
         prepare = bool(self.config_data.get("prepare_only", False))
         exe = self.config_data.get("builder_exe", "")
         if not prepare and (not exe or not os.path.isfile(exe)):
-            self.batch_page.banner.show(
-                "error", "No MHD map builder configured. Set its path in the Settings tab.",
-                action_text="Open settings", action=lambda: self.tabs.select("settings"))
+            self.batch_page.banner.show("error", t("setup.body",
+                                                   what=t("setup.what.builder")),
+                                        action_text=t("setup.open"),
+                                        action=lambda: self.app.go("settings"))
             return
         self.batch_log.clear()
         for index in range(len(self.batch_jobs)):
             self.batch_table.update_row(str(index), tag="dim")
-            self._set_batch_cell(index, status="queued", output="")
-        verb = "Preparing" if prepare else "Running"
-        self.batch_page.banner.show("busy", f"{verb} {len(self.batch_jobs)} job(s)…")
+            self._set_batch_cell(index, status=t("word.queued"), output="")
+        self.batch_page.banner.show("busy", t("status.locking"))
+        self.step_batch_run.set_state("now")
         self._start(list(self.batch_jobs), target="batch", prepare_only=prepare)
 
     def _start(self, jobs, target, prepare_only=False):
@@ -2141,7 +2249,8 @@ class MhdLockTool(_TkBase):
             return
         self._stop_event = threading.Event()
         self._busy(True)
-        self.status.set("Working…", "busy")
+        self.app.set_status(t("status.preparing") if prepare_only
+                            else t("status.locking"), "busy")
         self._worker = threading.Thread(target=self._work,
                                         args=(jobs, target, prepare_only), daemon=True)
         self._worker.start()
@@ -2298,15 +2407,20 @@ class MhdLockTool(_TkBase):
                     handler(**payload)
         except queue.Empty:
             pass
-        self._drain_id = self.after(120, self._drain_events)
+        self._drain_id = self.app.after(120, self._drain_events)
 
     def _on_event_log(self, target, line, tag):
-        view = self.batch_log if target == "batch" else self.log
-        view.write(line, tag, follow=True)
+        if target == "batch":
+            self.batch_log.write(line, tag, follow=True)
+        else:
+            self._show_log()
+            self.log.write(line, tag, follow=True)
 
     def _on_event_job(self, index, status, output="", tag=None):
         if str(index) in self.batch_table.tree.get_children():
-            self._set_batch_cell(index, status=status, output=output)
+            self._set_batch_cell(index, status=t(f"word.{status}")
+                                 if f"word.{status}" in STATUS_KEYS else status,
+                                 output=output)
             self.batch_table.update_row(str(index), tag=tag or "dim")
 
     def _on_event_result(self, target, path):
@@ -2315,35 +2429,47 @@ class MhdLockTool(_TkBase):
     def _on_event_done(self, target, successes, failures, total, prepared=False):
         self._busy(False)
         page = self.batch_page if target == "batch" else self.lock_page
-        done = "prepared" if prepared else "locked"
+        key = "banner.batch_prepared" if prepared else "banner.batch_done"
         if failures == 0 and successes:
-            tone, text = "ok", (f"{successes} of {total} job(s) {done}."
-                                if total > 1 else
-                                ("Folder prepared." if prepared else "Locked successfully."))
+            tone = "ok"
+            if target == "batch" or total > 1:
+                message = t(key, ok=successes, failed=failures, total=total)
+            elif prepared:
+                message = t("banner.prepared")
+            else:
+                message = t("banner.locked", vin=self.var_vin.get() or "?")
         elif successes:
-            tone, text = "warn", f"{successes} {done}, {failures} failed. See the log."
+            tone = "warn"
+            message = t(key, ok=successes, failed=failures, total=total)
         else:
-            tone, text = "error", f"Nothing was {done}. See the log."
-        last = getattr(self, "_last_output", "")
+            tone = "error"
+            message = t("banner.nothing")
+        last = self._last_output
         if tone == "ok" and last:
-            text = f"{text}\n{last}"
-            page.banner.show(tone, text, action_text="Show in folder",
+            page.banner.show(tone, message, action_text=t("word.open_folder"),
                              action=lambda p=last: ui.reveal_in_file_manager(p))
             if prepared or self.config_data.get("open_after_success"):
                 ui.reveal_in_file_manager(last)
         else:
-            page.banner.show(tone, text)
-            # The message says "see the log", so put the log in front of them.
-            # Routine state stays folded away; a failed run is not routine.
-            if target != "batch" and hasattr(self, "details"):
-                self.details.expand()
-        self.status.set(f"{successes} {done} · {failures} failed", tone)
+            page.banner.show(tone, message)
+            # The message says the log has it, so put the log in front of them.
+            if target != "batch":
+                self._show_log()
+        self.app.set_status(message if len(message) < 60 else t("word.done"), tone)
         if target == "batch":
-            self.var_batch_summary.set(f"{successes} {done} · {failures} failed · "
-                                       f"{total} total")
+            self.var_batch_summary.set(t(key, ok=successes, failed=failures,
+                                         total=total))
+            self.step_batch_run.set_state("done" if tone == "ok" else "err")
+            self.step_batch_run.set_note(t("batch.step3.progress", done=successes,
+                                           total=total))
+        else:
+            self.step_run.set_state("done" if tone == "ok" else "err")
+            if tone == "ok" and last:
+                self.step_run.set_note(os.path.basename(last))
+                self.step_run.set_title(t("lock.step4.done") if not prepared
+                                        else t("lock.step4"))
 
-    # ── Batch plumbing ───────────────────────────────────────────────────────
-
+    # ── Batch plumbing ──────────────────────────────────────────────────────
     def _set_batch_cell(self, index, status=None, output=None):
         job = self.batch_jobs[index]
         current = self.batch_table.tree.item(str(index), "values")
@@ -2361,15 +2487,41 @@ class MhdLockTool(_TkBase):
     def _batch_refresh(self):
         self.batch_table.clear()
         for index, job in enumerate(self.batch_jobs):
-            self.batch_table.add([job.customer, job.vin, os.path.basename(job.tuned_bin),
-                                  "queued", ""], iid=str(index), tag="dim")
-        self.batch_card.set_hint(f"{len(self.batch_jobs)} job(s)")
-        self.var_batch_summary.set("Queue is empty" if not self.batch_jobs
-                                   else f"{len(self.batch_jobs)} job(s) queued")
+            self.batch_table.add([job.customer, job.vin,
+                                  os.path.basename(job.tuned_bin),
+                                  t("word.queued"), ""], iid=str(index), tag="dim")
+        count = len(self.batch_jobs)
+        self.var_batch_summary.set(t("batch.step1.empty") if not count
+                                   else t("batch.step1.count", n=count))
+        self.step_files.set_note(t("batch.step1.count", n=count) if count else "")
+        self.step_files.set_state("done" if count else "now")
+        self._batch_marks()
+
+    def _batch_marks(self):
+        for child in self.batch_marks.winfo_children():
+            child.destroy()
+        count = len(self.batch_jobs)
+        if not count:
+            self.step_batch_check.set_state("next")
+            self.step_batch_run.set_state("next")
+            self.lbl_batch_check.configure(text=t("batch.step2.idle"))
+            return
+        bad = self._batch_counts.get("unresolved", 0) + self._batch_counts.get("no_vin", 0)
+        ready = max(0, count - bad)
+        chip = ui.tag(self.batch_marks, f"{ready} {t('word.ready').lower()}",
+                      "ok" if ready else "idle", bg=ui.BG)
+        chip.pack(side=tk.LEFT, padx=(0, ui.px(7)))
+        if bad:
+            chip = ui.tag(self.batch_marks, f"{bad} {t('word.missing')}", "error",
+                          bg=ui.BG)
+            chip.pack(side=tk.LEFT, padx=(0, ui.px(7)))
+        self.lbl_batch_check.configure(text="")
+        self.step_batch_check.set_state("done" if not bad else "err")
+        self.step_batch_run.set_state("now" if ready else "next")
 
     def _batch_add_files(self):
         paths = filedialog.askopenfilenames(
-            title="Select tuned .bin files",
+            title=t("dlg.batch_files"),
             filetypes=[("ROM image", "*.bin"), ("All files", "*.*")])
         if not paths:
             return
@@ -2392,44 +2544,48 @@ class MhdLockTool(_TkBase):
             if not (job.stock_bin and job.xdf):
                 unresolved += 1
             self.batch_jobs.append(job)
+        missing_vin = [j for j in self.batch_jobs if not validate_vin(j.vin)[0]]
+        self._batch_counts = {"total": len(self.batch_jobs),
+                              "unresolved": unresolved,
+                              "no_vin": len(missing_vin)}
         self._batch_refresh()
-        self.batch_log.write(f"Added {len(paths)} job(s) - stock ROM and XDF resolved "
-                             f"per file.", "ok", follow=True)
+        self.batch_log.write(f"+ {len(paths)}", "ok", follow=True)
         if unresolved:
-            self.batch_log.write(f" ! {unresolved} job(s) without a stock ROM or XDF - "
-                                 f"set a library folder in Settings.", "warn", follow=True)
+            self.batch_log.write(f" ! {unresolved} without a stock ROM or XDF",
+                                 "warn", follow=True)
         if inherited:
             # one VIN across several cars locks them all to the first one
-            self.batch_log.write(f" ! {inherited} job(s) carry no VIN of their own and "
-                                 f"took {base.vin} from the Lock tab - check the VIN "
-                                 f"column row by row.", "warn", follow=True)
-        missing_vin = [j for j in self.batch_jobs if not validate_vin(j.vin)[0]]
+            self.batch_log.write(f" ! {inherited} carry no VIN of their own and took "
+                                 f"{base.vin} from the Lock page", "warn", follow=True)
         if missing_vin:
-            self.batch_log.write(f" ! {len(missing_vin)} job(s) still need a VIN - select a "
-                                 f"row and fill it in below.", "warn", follow=True)
+            self.batch_log.write(f" ! {len(missing_vin)} still need a VIN",
+                                 "warn", follow=True)
 
     def _batch_import_csv(self):
-        path = filedialog.askopenfilename(title="Import batch CSV",
-                                          filetypes=[("CSV", "*.csv"), ("All files", "*.*")])
+        path = filedialog.askopenfilename(title=t("dlg.csv"),
+                                          filetypes=[("CSV", "*.csv"),
+                                                     ("All files", "*.*")])
         if not path:
             return
         try:
             jobs, problems = read_batch_csv(path, self._current_job())
         except OSError as exc:
-            self.batch_page.banner.show("error", f"Could not read the CSV: {exc}")
+            self.batch_page.banner.show("error", str(exc))
             return
         self.batch_jobs.extend(jobs)
+        self._batch_counts["total"] = len(self.batch_jobs)
         self._batch_refresh()
-        self.batch_log.write(f"Imported {len(jobs)} job(s) from {os.path.basename(path)}",
-                             "ok", follow=True)
+        self.batch_log.write(f"+ {len(jobs)} ({os.path.basename(path)})", "ok",
+                             follow=True)
         for problem in problems:
             self.batch_log.write(f"  {problem}", "warn", follow=True)
 
     def _batch_export(self):
         if not self.batch_jobs:
-            self.batch_page.banner.show("error", "Nothing to export. The queue is empty.")
+            self.batch_page.banner.show("error", t("err.no_jobs"))
             return
-        path = filedialog.asksaveasfilename(title="Export batch report", defaultextension=".csv",
+        path = filedialog.asksaveasfilename(title=t("dlg.report"),
+                                            defaultextension=".csv",
                                             filetypes=[("CSV", "*.csv")])
         if not path:
             return
@@ -2440,12 +2596,14 @@ class MhdLockTool(_TkBase):
                          "tuned_bin": job.tuned_bin, "status": values[3],
                          "output": values[4], "detail": ""})
         write_report_csv(path, rows)
-        self.batch_page.banner.show("ok", f"Report written:\n{path}",
-                                    action_text="Show in folder",
+        self.batch_page.banner.show("ok", t("banner.log_saved",
+                                            name=os.path.basename(path)),
+                                    action_text=t("word.open_folder"),
                                     action=lambda: ui.reveal_in_file_manager(path))
 
     def _batch_remove(self):
-        selected = sorted((int(iid) for iid in self.batch_table.selection()), reverse=True)
+        selected = sorted((int(iid) for iid in self.batch_table.selection()),
+                          reverse=True)
         for index in selected:
             if 0 <= index < len(self.batch_jobs):
                 self.batch_jobs.pop(index)
@@ -2453,6 +2611,7 @@ class MhdLockTool(_TkBase):
 
     def _batch_clear(self):
         self.batch_jobs.clear()
+        self._batch_counts = {"total": 0, "unresolved": 0, "no_vin": 0}
         self._batch_refresh()
 
     def _batch_selected_index(self):
@@ -2462,12 +2621,12 @@ class MhdLockTool(_TkBase):
     def _batch_load_selected(self):
         index = self._batch_selected_index()
         if index is None or index >= len(self.batch_jobs):
-            self.lbl_batch_file.config(text="No job selected")
+            self.lbl_batch_file.config(text=t("batch.selected"))
             return
         job = self.batch_jobs[index]
         self.var_b_customer.set(job.customer)
         self.var_b_vin.set(job.vin)
-        self.lbl_batch_file.config(text=job.tuned_bin)
+        self.lbl_batch_file.config(text=os.path.basename(job.tuned_bin))
 
     def _batch_apply_edit(self):
         index = self._batch_selected_index()
@@ -2485,24 +2644,16 @@ class MhdLockTool(_TkBase):
         for index, job in enumerate(self.batch_jobs):
             job.vin = vin
             self._set_batch_cell(index)
-        self.batch_log.write(f"VIN {vin} applied to {len(self.batch_jobs)} job(s).",
-                             "info", follow=True)
+        self._batch_counts["no_vin"] = 0
+        self._batch_marks()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    if not TK_AVAILABLE:
-        print(f"{APP_NAME} v{APP_VERSION} · {brand.VENDOR}", file=sys.stderr)
-        print("tkinter is not available in this Python installation.", file=sys.stderr)
-        print("Windows/macOS: reinstall Python and tick 'tcl/tk and IDLE'.", file=sys.stderr)
-        print("Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)
-        return 1
-    ui.enable_dpi_awareness()
-    app = MhdLockTool()
-    app.geometry(f"{ui.px(1040)}x{ui.px(820)}")
-    app.mainloop()
-    return 0
+    """The Lock area of the one app. Kept so the Start menu entry still works."""
+    import dme_app
+    return dme_app.main("lock")
 
 
 if __name__ == "__main__":

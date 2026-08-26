@@ -407,5 +407,5 @@ class TestPresetsAgainstRealReads(unittest.TestCase):
     def test_a_remembered_layout_outranks_a_preset(self):
         """The device's own split must win over any guess with the same total."""
         import inspect
-        src = inspect.getsource(at.AutoTunerTool._auto_layout)
+        src = inspect.getsource(at.BackupUI._auto_layout)
         self.assertLess(src.index("layout_for_size"), src.index("presets_for_size"))

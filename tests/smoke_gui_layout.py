@@ -1,7 +1,7 @@
 """
-Does the page stand still when you switch pages?
+Does the page stand still when you switch areas?
 
-The complaint was "die Zeilen verrutschen": every click on the sidebar moved
+The complaint was "die Zeilen verrutschen": every click in the navigation moved
 the content up or down and the whole page reflowed on the way. Three causes,
 all of them measurable from here:
 
@@ -13,11 +13,11 @@ all of them measurable from here:
   * the scrollbar took a column of its own, so it changed the canvas width
     when it appeared, which rewrapped the text, which changed the height.
 
-This test walks every page of both tools and asserts that the content sits at
-exactly the same pixel each time. It fails on the old code and passes on the
-new one.
+This test walks every area of the app and asserts that the content sits at
+exactly the same pixel each time, in both languages. It fails on 2.3.3 and
+passes from 2.3.4 on.
 
-    xvfb-run -a -s "-screen 0 1100x860x24" python tests/smoke_gui_layout.py
+    xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_layout.py
 """
 import os
 import sys
@@ -29,23 +29,21 @@ sys.path.insert(0, ROOT)
 WORK = tempfile.mkdtemp(prefix="layout_smoke_")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(WORK, "config")
 
-import dme_ui as ui            # noqa: E402
-import autotuner_tool as a     # noqa: E402
-import mhd_lock_tool as m      # noqa: E402
+import dme_app   # noqa: E402
+import dme_text  # noqa: E402
 
-assert m.TK_AVAILABLE and a.TK_AVAILABLE, "tkinter missing"
+assert dme_app.TK_AVAILABLE, "tkinter missing"
 
 failures = []
+AREAS = dme_app.AREAS
 
 
-def probe(app, keys, size):
-    """Where does each page's content sit, and does it stay there?"""
-    app.geometry(size)
+def probe(app, label):
+    """Where does each area's content sit, and does it stay there?"""
     app.update()
-
     seen = {}
-    for key in keys:
-        app.tabs.select(key)
+    for key in AREAS:
+        app.shell.select(key)
         app.update()
         page = app.pages[key]
         seen[key] = {
@@ -56,65 +54,63 @@ def probe(app, keys, size):
             "bar": page.scroll.scrollbar.winfo_manager(),
         }
 
-    # Every page starts at the same pixel: the header reserves one height for
+    # Every area starts at the same pixel: the header reserves one height for
     # all of them, whatever their subtitle says.
     tops = set(v["page"] for v in seen.values())
     if len(tops) != 1:
-        failures.append(f"{app.__class__.__name__}: pages start at {sorted(tops)}, "
-                        f"the header changes height between pages")
+        failures.append(f"{label}: areas start at {sorted(tops)}, the header "
+                        f"changes height between them")
 
     widths = set(v["width"] for v in seen.values())
     if len(widths) != 1:
-        failures.append(f"{app.__class__.__name__}: pages are {sorted(widths)} px wide, "
-                        f"they should all fill the host")
+        failures.append(f"{label}: areas are {sorted(widths)} px wide, they should "
+                        f"all fill the host")
 
-    for key, v in seen.items():
-        if v["bar"] == "pack":
-            failures.append(f"{app.__class__.__name__}/{key}: the scrollbar is packed, "
-                            f"so showing it steals width from the content")
+    for key, value in seen.items():
+        if value["bar"] == "pack":
+            failures.append(f"{label}/{key}: the scrollbar is packed, so showing it "
+                            f"steals width from the content")
 
     # Go round again. Nothing may have moved in the meantime.
-    for key in list(keys) + list(reversed(keys)):
-        app.tabs.select(key)
+    for key in list(AREAS) + list(reversed(AREAS)):
+        app.shell.select(key)
         app.update()
         page = app.pages[key]
-        for name, value in (("page", page.winfo_rooty()), ("body", page.body.winfo_rooty()),
+        for name, value in (("page", page.winfo_rooty()),
+                            ("body", page.body.winfo_rooty()),
                             ("host", app.shell.host.winfo_rooty())):
             if value != seen[key][name]:
-                failures.append(f"{app.__class__.__name__}/{key}: {name} moved from "
-                                f"{seen[key][name]} to {value} on the second visit")
+                failures.append(f"{label}/{key}: {name} moved from {seen[key][name]} "
+                                f"to {value} on the second visit")
     return seen
 
 
-# ── The tool with the three pages and three different subtitles ─────────────
-lock = m.MhdLockTool()
-seen = probe(lock, ("lock", "batch", "settings"), "1040x820")
-print("MHD Lock Tool   :", ", ".join(f"{k} y={v['page']}" for k, v in seen.items()))
+app = dme_app.DmeApp()
+app.geometry("1120x820")
+seen = probe(app, "German")
+print("German  :", ", ".join(f"{k} y={v['page']}" for k, v in seen.items()))
 
-# A subtitle that grows must not move the page either: the header already keeps
-# room for the longest one of all pages.
-before = lock.pages["lock"].winfo_rooty()
-lock.shell.set_subtitle("lock", m.PREPARE_SUBTITLE)
-lock.update()
-after = lock.pages["lock"].winfo_rooty()
+# A setting that rewords the header must not move the page either: the header
+# already keeps room for the longest subtitle any area can show.
+app.shell.select("lock")
+app.update()
+before = app.pages["lock"].winfo_rooty()
+app.lock.var_prepare_only.set(True)
+app.lock.save_settings()
+app.update()
+after = app.pages["lock"].winfo_rooty()
 if before != after:
-    failures.append(f"MhdLockTool: rewording the subtitle moved the page {before} -> {after}")
-print("subtitle swap   : page stays at", after)
-lock.destroy()
+    failures.append(f"folder mode moved the page {before} -> {after}")
+print("folder mode: page stays at", after)
+app.lock.var_prepare_only.set(False)
+app.lock.save_settings()
+app.update()
 
-# ── And the two page tool ───────────────────────────────────────────────────
-auto = a.AutoTunerTool()
-seen = probe(auto, ("z2b", "b2z"), "980x780")
-print("AutoTuner Tool  :", ", ".join(f"{k} y={v['page']}" for k, v in seen.items()))
-
-# _active() no longer asks a widget whether it is mapped - every page is.
-for key in ("b2z", "z2b"):
-    auto.tabs.select(key)
-    auto.update()
-    if auto._active() != key:
-        failures.append(f"AutoTunerTool: _active() says {auto._active()!r}, not {key!r}")
-print("active page     : reported correctly on both pages")
-auto.destroy()
+# The other language has longer words in places. It may not move anything.
+app.set_language("en")
+seen_en = probe(app, "English")
+print("English :", ", ".join(f"{k} y={v['page']}" for k, v in seen_en.items()))
+app.destroy()
 
 if failures:
     for line in failures:

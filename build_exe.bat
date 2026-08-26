@@ -32,12 +32,11 @@ if not exist "assets\dme-icon.ico" (
 )
 
 echo.
-echo Building one executable that carries all three programs...
-echo   (Python and tkinter go in once, not three times - the launcher starts
-echo    itself again with --tool ^<key^> to open a tool.)
+echo Building the one executable...
+echo   (One window, three ways in: plain, --tool mhd and --tool autotuner.)
 pyinstaller --onefile --windowed --noconfirm --clean ^
     --name "DME Innovation Tools" --icon "assets\dme-icon.ico" ^
-    --hidden-import autotuner_tool --hidden-import mhd_lock_tool ^
+    --hidden-import dme_app --hidden-import autotuner_tool --hidden-import mhd_lock_tool ^
     dme_suite.py
 if errorlevel 1 goto :failed
 

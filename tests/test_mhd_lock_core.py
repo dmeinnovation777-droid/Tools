@@ -9,6 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import dme_text
 import mhd_lock_tool as m  # noqa: E402
 
 
@@ -65,12 +66,21 @@ class TestVin(unittest.TestCase):
     def test_rejects_wrong_length(self):
         ok, _vin, message = m.validate_vin("DMETEST000000000")
         self.assertFalse(ok)
+        self.assertEqual(message, dme_text.t("vin.length", n=16))
         self.assertIn("17", message)
 
     def test_rejects_forbidden_letters(self):
         ok, _vin, message = m.validate_vin("DMETEST000000000I")
         self.assertFalse(ok)
-        self.assertIn("invalid characters", message)
+        self.assertEqual(message, dme_text.t("vin.chars"))
+
+    def test_the_verdict_speaks_the_window_language(self):
+        """One place decides, and it says so in whichever language is on."""
+        self.addCleanup(dme_text.set_language, dme_text.language())
+        dme_text.set_language("de")
+        self.assertIn("sieht gut aus", m.validate_vin("DMETEST0000000001")[2])
+        dme_text.set_language("en")
+        self.assertIn("looks valid", m.validate_vin("DMETEST0000000001")[2])
 
     def test_rejects_empty(self):
         self.assertFalse(m.validate_vin("")[0])
@@ -1062,20 +1072,21 @@ class TestTheLogIsReachableAfterAFailure(unittest.TestCase):
 
     def test_the_banner_sends_you_to_the_log(self):
         import inspect
-        source = inspect.getsource(m.MhdLockTool._on_event_done)
-        self.assertIn("See the log", source)
-        self.assertIn("self.details.expand()", source)
+        source = inspect.getsource(m.LockUI._on_event_done)
+        self.assertIn("banner.nothing", source)
+        # The log lives inside the step that ran; a failure has to unfold it.
+        self.assertIn("self._show_log()", source)
 
     def test_saving_the_log_is_offered(self):
         import inspect
-        page = inspect.getsource(m.MhdLockTool._build_lock_page)
-        self.assertIn("Save log", page)
-        self.assertTrue(callable(m.MhdLockTool._save_log))
+        page = inspect.getsource(m.LockUI._build_lock_page)
+        self.assertIn("word.save_log", page)
+        self.assertTrue(callable(m.LockUI._save_log))
 
     def test_the_saved_log_names_what_was_run(self):
         """Without the paths and the version a log cannot be acted on."""
         import inspect
-        source = inspect.getsource(m.MhdLockTool._save_log)
+        source = inspect.getsource(m.LockUI._save_log)
         for field in ("Tuned", "Stock", "XDF", "Tool key", "VIN", "Builder"):
             self.assertIn(field, source)
 

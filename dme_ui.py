@@ -19,19 +19,21 @@ from tkinter import font as tkfont
 # ─────────────────────────────────────────────────────────────────────────────
 # Palette
 # ─────────────────────────────────────────────────────────────────────────────
-# Three greys stacked, the way a Mac window stacks them: the sidebar sits
-# deepest, the working canvas above it, the card on top. tk cannot draw a
-# shadow, so the card has to separate by fill alone - which is why the canvas
-# is not the near white of the drawing.
-SURFACE = "#EDEDF1"     # sidebar (must match dme_brand.HEADER_BG)
-BG = "#F4F4F6"          # working canvas
-CARD = "#FFFFFF"        # raised surface
-CARD_ALT = "#F7F7F9"    # nested rows, table headers, input wells
-HOVER = "#E9E9EE"       # hover fill
-BORDER = "#DCDCE1"      # hairline
-BORDER_SOFT = "#E8E8EC"
-FIELD = "#F7F7F9"       # input well, tinted so the card reads as the surface
-FIELD_BORDER = "#DCDCE1"
+# White first. The old look stacked three greys because the content sat on
+# cards; the flow has no cards, so the page itself is the paper and the only
+# tinted surfaces are the wells that hold a value. Two hairlines carry the
+# structure: the soft one inside a box, the faint one under the top bar.
+SURFACE = "#FFFFFF"     # top bar and action bar (must match dme_brand.HEADER_BG)
+BG = "#FFFFFF"          # the page
+CARD = "#FFFFFF"        # a box on the page, told apart by its outline
+CARD_ALT = "#F7F7F9"    # wells, table headers, input fields
+HOVER = "#F0F0F3"       # hover fill
+BORDER = "#DCDCE1"      # hairline that has to be seen
+BORDER_SOFT = "#E8E8EC" # hairline inside a box
+HAIRLINE = "#EDEDF1"    # under the top bar, over the action bar
+RAIL = "#E8E8EC"        # the line down the side of a flow
+FIELD = "#F7F7F9"
+FIELD_BORDER = "#E8E8EC"
 
 # Three steps. All three clear 4.5:1 on every ground the app can put behind
 # them, HOVER included - the faint one carries hints, provenance and table rows,
@@ -137,6 +139,8 @@ def init(root) -> None:
         "h1":     (ui, 22, "bold"),   # the screen title carries the page
         "h1s":    (ui, 12, "bold"),
         "h2":     (ui, 11, "bold"),   # card titles
+        "step":   (ui, 11, "bold"),   # the name of a step in a flow
+        "ring":   (ui, 9, "bold"),    # the number inside the ring
         "section": (ui, 8, "bold"),   # the quiet header above a grouped list
         "body":   (ui, 10),
         "label":  (ui, 9),
@@ -216,20 +220,17 @@ def _round_points(x1, y1, x2, y2, r):
             x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
 
 
-def round_corners(widget, radius=None, outer_bg=BG):
-    """
-    Give a normally packed widget rounded corners.
+def round_corners(widget, radius=None, outer_bg=BG, border=None):
+    """Fake a rounded corner by painting the outside of it.
 
-    Four small canvases sit in the corners and paint the area outside the arc in
-    the surrounding colour. The widget keeps its own geometry manager, so this
-    costs nothing in layout terms.
+    tk has no border radius. Each corner gets a small canvas filled with the
+    OUTER colour, and an arc in the widget's own fill painted on top; the square
+    corner underneath disappears. With ``border`` the arc is stroked as well, so
+    a box with a hairline outline keeps that hairline around the bend.
     """
     radius = px(10) if radius is None else radius
     inner_bg = widget["bg"]
     corners = []
-    # corner order: top-left, top-right, bottom-right, bottom-left. The arc's
-    # bounding box is twice the radius and shifted so its centre lands on the
-    # inner corner; the visible quadrant is the one pointing outwards.
     for index in range(4):
         canvas = tk.Canvas(widget, width=radius, height=radius, bg=outer_bg,
                            highlightthickness=0, bd=0)
@@ -238,9 +239,23 @@ def round_corners(widget, radius=None, outer_bg=BG):
         canvas.create_arc(offset[0], offset[1], offset[0] + radius * 2,
                           offset[1] + radius * 2, start=start, extent=90,
                           fill=inner_bg, outline=inner_bg)
+        if border:
+            # A second arc, stroke only, so the outline follows the curve.
+            canvas.create_arc(offset[0] + 0.5, offset[1] + 0.5,
+                              offset[0] + radius * 2 - 0.5,
+                              offset[1] + radius * 2 - 0.5,
+                              start=start, extent=90, style="arc",
+                              outline=border, width=1)
         corners.append(canvas)
 
     def place(_=None):
+        # A corner wider than half the widget would paint the whole thing in
+        # the outer colour and the widget would simply vanish. It happened.
+        width, height = widget.winfo_width(), widget.winfo_height()
+        if width > 1 and height > 1 and radius * 2 > min(width, height):
+            for corner in corners:
+                corner.place_forget()
+            return
         corners[0].place(x=0, y=0)
         corners[1].place(relx=1.0, x=-radius, y=0)
         corners[2].place(relx=1.0, rely=1.0, x=-radius, y=-radius)
@@ -249,6 +264,19 @@ def round_corners(widget, radius=None, outer_bg=BG):
     widget.bind("<Configure>", place, add="+")
     place()
     return corners
+
+
+def outlined(parent, fill=CARD, border=BORDER_SOFT, radius=12, bg=None):
+    """A box with a hairline outline and rounded corners. Sizes to its content.
+
+    The new design has no drop shadows and almost no fills, so a box is told
+    from the page by its outline alone. Returns the frame to pack into.
+    """
+    outer = bg or parent["bg"]
+    box = tk.Frame(parent, bg=fill, highlightthickness=1,
+                   highlightbackground=border, highlightcolor=border, bd=0)
+    round_corners(box, px(radius), outer_bg=outer, border=border)
+    return box
 
 
 def wrap_to_parent(label, minimum=None, inset=None):
@@ -380,10 +408,12 @@ class GroupedList(tk.Frame):
         if label:
             tk.Label(self, text=label, bg=bg, fg=TEXT_FAINT, font=f("section"),
                      anchor="w").pack(fill=tk.X, padx=px(4), pady=(0, px(6)))
-        self.body = tk.Frame(self, bg=CARD)
+        self.body = tk.Frame(self, bg=CARD, highlightthickness=1, bd=0,
+                             highlightbackground=BORDER_SOFT,
+                             highlightcolor=BORDER_SOFT)
         self.body.pack(fill=tk.BOTH, expand=True)
-        self._corners = round_corners(self.body, px(12) if radius is None else radius,
-                                      outer_bg=bg)
+        self._corners = round_corners(self.body, px(14) if radius is None else radius,
+                                      outer_bg=bg, border=BORDER_SOFT)
         self._rows = 0
 
     def row(self, pad=(14, 11)):
@@ -443,17 +473,20 @@ def reveal_in_file_manager(path: str) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # Buttons
 # ─────────────────────────────────────────────────────────────────────────────
+# Amber for the one action, white with a hairline for the one beside it, and
+# nothing at all for everything further down the ladder. That is the whole
+# ranking, and it is the same on every page.
 _VARIANTS = {
     "primary":   dict(bg=ACCENT, fg=ON_ACCENT, hover=ACCENT_HOVER, press=ACCENT_PRESS),
-    "secondary": dict(bg=CARD_ALT, fg=TEXT, hover=HOVER, press=BORDER,
-                      border=FIELD_BORDER),
+    "secondary": dict(bg=CARD, fg=TEXT, hover=HOVER, press=BORDER,
+                      border=BORDER),
     "ghost":     dict(bg=CARD, fg=TEXT_DIM, hover=HOVER, press=BORDER),
-    "danger":    dict(bg=CARD_ALT, fg=ERR, hover=ERR_BG, press=ERR_BG),
+    "danger":    dict(bg=CARD, fg=ERR, hover=ERR_BG, press=ERR_BG, border=BORDER),
 }
 _SIZES = {
-    "lg": dict(padx=20, pady=9, font="button"),
-    "md": dict(padx=14, pady=6, font="button"),
-    "sm": dict(padx=10, pady=4, font="small"),
+    "lg": dict(padx=22, pady=11, font="button", radius=12),
+    "md": dict(padx=17, pady=8, font="button", radius=11),
+    "sm": dict(padx=11, pady=5, font="small", radius=9),
 }
 
 
@@ -473,8 +506,9 @@ class RoundedButton(tk.Canvas):
         self._state = "normal"
         self._font = f(dims["font"])
         self._padx, self._pady = px(dims["padx"]), px(dims["pady"])
-        # a pill, not a rounded box - the radius is half the height, set in _draw
-        self._radius = px(999)
+        # A rounded box, not a pill. The drawing puts an 11 px radius on a
+        # 42 px button, and a pill at that height reads as a chip, not a button.
+        self._radius = px(dims["radius"])
         self._border = spec.get("border")
 
         super().__init__(parent, bg=self._outer, highlightthickness=0, bd=0,
@@ -673,8 +707,10 @@ class Card(tk.Frame):
     """Bordered content block with an optional title row."""
 
     def __init__(self, parent, title=None, hint=None, bg=CARD, pad=(16, 14)):
-        super().__init__(parent, bg=bg, highlightthickness=0, bd=0)
-        round_corners(self, px(18), outer_bg=parent["bg"])
+        # The page is white too, so the outline is what makes this a box.
+        super().__init__(parent, bg=bg, highlightthickness=1, bd=0,
+                         highlightbackground=BORDER_SOFT, highlightcolor=BORDER_SOFT)
+        round_corners(self, px(14), outer_bg=parent["bg"], border=BORDER_SOFT)
         px_, py = px(pad[0]), px(pad[1])
         self.hint_var = tk.StringVar(value=hint or "")
         if title:
@@ -694,44 +730,225 @@ class Card(tk.Frame):
             self.hint_label.configure(fg=_TONE.get(tone, (TEXT_FAINT, None))[0])
 
 
-class TabBar(tk.Frame):
-    """Underline tab strip, the app's primary navigation."""
+class _Chip(tk.Frame):
+    """A rounded label whose fill can change: nav pill, segment, tag."""
 
-    def __init__(self, parent, tabs, command, bg=BG):
-        super().__init__(parent, bg=bg)
+    def __init__(self, parent, text, command=None, radius=9, outer=None,
+                 pad=(13, 7), font_key="tab", bg=None):
+        outer = outer or parent["bg"]
+        super().__init__(parent, bg=bg or outer)
+        self._label = tk.Label(self, text=text, bg=self["bg"], fg=TEXT_DIM,
+                               font=f(font_key), padx=px(pad[0]), pady=px(pad[1]))
+        self._label.pack()
+        self._corners = round_corners(self, px(radius), outer_bg=outer)
+        if command is not None:
+            for widget in (self, self._label):
+                widget.configure(cursor="hand2")
+                widget.bind("<Button-1>", lambda _e: command())
+
+    def set_fill(self, bg, fg, font_key=None):
+        self.configure(bg=bg)
+        self._label.configure(bg=bg, fg=fg)
+        if font_key:
+            self._label.configure(font=f(font_key))
+        # The corner canvas keeps the OUTER colour; the arc on it is the fill.
+        for corner in self._corners:
+            corner.itemconfigure("all", fill=bg, outline=bg)
+
+    def set_text(self, text):
+        self._label.configure(text=text)
+
+
+def tag(parent, text, tone="idle", bg=None):
+    """A small state word on a tinted pill. Reads at a glance, says one thing."""
+    fg, fill = _TONE.get(tone, _TONE["idle"])
+    chip = _Chip(parent, text, radius=11, outer=bg or parent["bg"],
+                 pad=(9, 3), font_key="micro")
+    chip.set_fill(fill, fg)
+    return chip
+
+
+class Segmented(tk.Frame):
+    """Two or three ways of doing the same thing, side by side in one well."""
+
+    def __init__(self, parent, options, command=None, bg=None, font_key="tab"):
+        outer = bg or parent["bg"]
+        super().__init__(parent, bg=CARD_ALT)
+        round_corners(self, px(10), outer_bg=outer, border=BORDER_SOFT)
+        self.configure(highlightthickness=1, highlightbackground=BORDER_SOFT,
+                       highlightcolor=BORDER_SOFT)
         self._command = command
-        self._buttons = {}
-        self._underlines = {}
+        self._chips = {}
         self._active = None
-        strip = tk.Frame(self, bg=bg)
-        strip.pack(fill=tk.X, padx=px(22))
-        for key, label in tabs:
-            holder = tk.Frame(strip, bg=bg)
-            holder.pack(side=tk.LEFT)
-            btn = tk.Label(holder, text=label, bg=bg, fg=TEXT_DIM, font=f("tab"),
-                           padx=px(4), pady=px(11), cursor="hand2")
-            btn.pack()
-            underline = tk.Frame(holder, bg=bg, height=px(2))
-            underline.pack(fill=tk.X)
-            btn.bind("<Button-1>", lambda _e, k=key: self.select(k))
-            btn.bind("<Enter>", lambda _e, b=btn, k=key:
-                     b.configure(fg=TEXT) if self._active != k else None)
-            btn.bind("<Leave>", lambda _e, b=btn, k=key:
-                     b.configure(fg=TEXT_DIM) if self._active != k else None)
-            self._buttons[key] = btn
-            self._underlines[key] = underline
-            tk.Frame(strip, bg=bg, width=px(22)).pack(side=tk.LEFT)
-        hr(self, bg=BORDER_SOFT)
+        holder = tk.Frame(self, bg=CARD_ALT)
+        holder.pack(padx=px(3), pady=px(3))
+        for key, label in options:
+            chip = _Chip(holder, label, lambda k=key: self.select(k), radius=8,
+                         outer=CARD_ALT, pad=(15, 6), font_key=font_key)
+            chip.pack(side=tk.LEFT)
+            self._chips[key] = chip
+        if options:
+            self.select(options[0][0], notify=False)
 
-    def select(self, key):
-        if key == self._active:
+    def select(self, key, notify=True):
+        if key not in self._chips or key == self._active:
             return
         self._active = key
-        for k, btn in self._buttons.items():
-            active = k == key
-            btn.configure(fg=TEXT if active else TEXT_DIM)
-            self._underlines[k].configure(bg=ACCENT if active else self["bg"])
-        self._command(key)
+        for name, chip in self._chips.items():
+            if name == key:
+                chip.set_fill(CARD, TEXT)
+            else:
+                chip.set_fill(CARD_ALT, TEXT_FAINT)
+        if notify and self._command:
+            self._command(key)
+
+    @property
+    def active(self):
+        return self._active
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The flow
+# ─────────────────────────────────────────────────────────────────────────────
+# One page, one chain of steps, top to bottom. A step that is done keeps its
+# place and its answer; the one being worked on carries the only amber on the
+# page; the ones after it stand there greyed so you can see what is coming.
+# Everything a step produces - a log, an error, a result - appears inside that
+# step, which is the whole reason there is no second window any more.
+
+_RING = {
+    "done": dict(fill=OK, fg="#FFFFFF", line=OK, glyph="\u2713", halo=None),
+    "now":  dict(fill=ACCENT, fg=ON_ACCENT, line=ACCENT, glyph=None, halo=WARN_BG),
+    "err":  dict(fill=ERR, fg="#FFFFFF", line=ERR, glyph="\u2715", halo=ERR_BG),
+    "next": dict(fill=CARD, fg="#8E8E93", line=BORDER, glyph=None, halo=None),
+}
+_STEP_TITLE = {"done": TEXT, "now": TEXT, "err": TEXT, "next": "#8E8E93"}
+
+
+class Step(tk.Frame):
+    """One link in the chain: a ring, a name, a note, and a body you fill."""
+
+    RAIL = 38
+
+    def __init__(self, parent, number, title, state="next", note="", bg=BG):
+        super().__init__(parent, bg=bg)
+        self._bg = bg
+        self._number = number
+        self._state = state
+        self.columnconfigure(1, weight=1)
+
+        rail = tk.Frame(self, bg=bg, width=px(self.RAIL))
+        rail.grid(row=0, column=0, sticky="ns")
+        self._ring = tk.Canvas(rail, width=px(self.RAIL), height=px(self.RAIL),
+                               bg=bg, highlightthickness=0, bd=0)
+        self._ring.pack()
+        self._line = tk.Frame(rail, bg=RAIL, width=max(1, px(2)))
+        self._has_line = False
+
+        content = tk.Frame(self, bg=bg)
+        content.grid(row=0, column=1, sticky="nsew", padx=(px(10), 0))
+        self._content = content
+
+        head = tk.Frame(content, bg=bg, height=px(self.RAIL))
+        head.pack(fill=tk.X)
+        head.pack_propagate(False)
+        self._title = tk.Label(head, text=title, bg=bg, fg=_STEP_TITLE[state],
+                               font=f("step"), anchor="w")
+        self._title.pack(side=tk.LEFT)
+        self._note = tk.Label(head, text=note, bg=bg, fg=TEXT_FAINT,
+                              font=f("small"), anchor="w")
+        self._note.pack(side=tk.LEFT, padx=(px(9), 0))
+        if not note:
+            self._note.pack_forget()
+
+        self.body = tk.Frame(content, bg=bg)
+        self.body.pack(fill=tk.X, pady=(px(4), px(20)))
+        self._paint()
+
+    # ── the rail ────────────────────────────────────────────────────────────
+    def connect(self):
+        """Draw the line down to the next step. The last step never gets one."""
+        if not self._has_line:
+            self._line.pack(fill=tk.Y, expand=True, pady=(px(5), 0))
+            self._has_line = True
+
+    def last(self):
+        self.body.pack_configure(pady=(px(4), 0))
+
+    # ── state ───────────────────────────────────────────────────────────────
+    def set_state(self, state):
+        if state == self._state:
+            return
+        self._state = state
+        self._paint()
+        self._title.configure(fg=_STEP_TITLE[state])
+
+    @property
+    def state(self):
+        return self._state
+
+    def set_note(self, text, tone=None):
+        self._note.configure(text=text or "",
+                             fg=_TONE[tone][0] if tone else TEXT_FAINT)
+        if text:
+            if not self._note.winfo_manager():
+                self._note.pack(side=tk.LEFT, padx=(px(9), 0))
+        elif self._note.winfo_manager():
+            self._note.pack_forget()
+
+    def set_title(self, text):
+        self._title.configure(text=text)
+
+    def clear(self):
+        for child in self.body.winfo_children():
+            child.destroy()
+
+    def _paint(self):
+        spec = _RING[self._state]
+        canvas = self._ring
+        canvas.delete("all")
+        full = px(self.RAIL)
+        d = px(30)
+        pad = (full - d) / 2
+        if spec["halo"]:
+            canvas.create_oval(1, 1, full - 1, full - 1, fill=spec["halo"],
+                               outline=spec["halo"])
+        canvas.create_oval(pad, pad, pad + d, pad + d, fill=spec["fill"],
+                           outline=spec["line"], width=max(1, px(1.5)))
+        canvas.create_text(full / 2, full / 2 + px(0.5),
+                           text=spec["glyph"] or str(self._number),
+                           fill=spec["fg"], font=f("ring"))
+
+
+class Flow(tk.Frame):
+    """The chain itself. Add steps in order; the rail is drawn between them."""
+
+    def __init__(self, parent, bg=BG):
+        super().__init__(parent, bg=bg)
+        self._bg = bg
+        self._steps = []
+
+    def step(self, title, state="next", note=""):
+        if self._steps:
+            self._steps[-1].connect()
+        item = Step(self, len(self._steps) + 1, title, state=state, note=note,
+                    bg=self._bg)
+        item.pack(fill=tk.X)
+        item.last()
+        if len(self._steps) >= 1:
+            self._steps[-1].body.pack_configure(pady=(px(4), px(20)))
+        self._steps.append(item)
+        return item
+
+    def __getitem__(self, index):
+        return self._steps[index]
+
+    def __len__(self):
+        return len(self._steps)
+
+    @property
+    def steps(self):
+        return list(self._steps)
 
 
 class Banner(tk.Frame):
@@ -808,7 +1025,7 @@ class StatusBar(tk.Frame):
     def __init__(self, parent, signature=""):
         super().__init__(parent, bg=SURFACE, height=px(30))
         self.pack_propagate(False)
-        hr(self, bg=BORDER_SOFT)
+        hr(self, bg=HAIRLINE)
         row = tk.Frame(self, bg=SURFACE)
         row.pack(fill=tk.BOTH, expand=True)
         self._dot = tk.Label(row, text="●", bg=SURFACE, fg=TEXT_FAINT, font=f("micro"))
@@ -823,44 +1040,6 @@ class StatusBar(tk.Frame):
         self._var.set(text)
         self._dot.configure(fg=_TONE.get(tone, _TONE["idle"])[0])
         self.update_idletasks()
-
-
-class Header(tk.Frame):
-    """Top bar: DME wordmark, product name, version, optional right-hand slot."""
-
-    def __init__(self, parent, brand, product, version, tagline=""):
-        super().__init__(parent, bg=SURFACE)
-        row = tk.Frame(self, bg=SURFACE, height=px(62))
-        row.pack(fill=tk.X)
-        row.pack_propagate(False)
-
-        logo = brand.header_logo(row, scale=SCALE)
-        if logo is not None:
-            logo.pack(side=tk.LEFT, padx=(px(20), px(16)))
-        else:
-            tk.Label(row, text=brand.VENDOR.upper(), bg=SURFACE, fg=TEXT,
-                     font=f("title")).pack(side=tk.LEFT, padx=(20, 16))
-
-        tk.Frame(row, bg=BORDER, width=1).pack(side=tk.LEFT, fill=tk.Y, pady=16)
-
-        titles = tk.Frame(row, bg=SURFACE)
-        titles.pack(side=tk.LEFT, padx=16)
-        line = tk.Frame(titles, bg=SURFACE)
-        line.pack(anchor="w")
-        tk.Label(line, text=product, bg=SURFACE, fg=TEXT,
-                 font=f("title")).pack(side=tk.LEFT)
-        chip = tk.Frame(line, bg=CARD_ALT)
-        chip.pack(side=tk.LEFT, padx=10, pady=2)
-        tk.Label(chip, text=f"v{version}", bg=CARD_ALT, fg=TEXT_DIM,
-                 font=f("micro"), padx=7, pady=2).pack()
-        if tagline:
-            tk.Label(titles, text=tagline, bg=SURFACE, fg=TEXT_FAINT,
-                     font=f("small")).pack(anchor="w")
-
-        self.right = tk.Frame(row, bg=SURFACE)
-        self.right.pack(side=tk.RIGHT, padx=20)
-
-        tk.Frame(self, bg=ACCENT, height=px(2)).pack(fill=tk.X)
 
 
 class VScroll(tk.Frame):
@@ -1054,14 +1233,14 @@ class Page(tk.Frame):
     action bar, so the primary action never scrolls out of reach.
     """
 
-    def __init__(self, parent, bg=BG, pad=32):
+    def __init__(self, parent, bg=BG, pad=34, width=None):
         super().__init__(parent, bg=bg)
         pad = px(pad)
         self.action = tk.Frame(self, bg=SURFACE)
         self.action.pack(side=tk.BOTTOM, fill=tk.X)
-        tk.Frame(self.action, bg=BORDER_SOFT, height=1).pack(fill=tk.X)
+        tk.Frame(self.action, bg=HAIRLINE, height=1).pack(fill=tk.X)
         self.action_row = tk.Frame(self.action, bg=SURFACE)
-        self.action_row.pack(fill=tk.X, padx=pad, pady=12)
+        self.action_row.pack(fill=tk.X, padx=pad, pady=px(13))
 
         holder = tk.Frame(self, bg=bg)
         holder.pack(side=tk.BOTTOM, fill=tk.X, padx=pad, pady=(0, 12))
@@ -1070,8 +1249,30 @@ class Page(tk.Frame):
 
         self.scroll = VScroll(self, bg=bg)
         self.scroll.pack(fill=tk.BOTH, expand=True)
-        self.body = tk.Frame(self.scroll.inner, bg=bg)
-        self.body.pack(fill=tk.BOTH, expand=True, padx=pad, pady=(18, 8))
+        # A line of text that runs the full 1120 px is scanned, not read, so
+        # the content keeps to a column and the window grows around it. Two
+        # grid columns do it: the content one is held at a width by minsize,
+        # the empty one beside it has all the weight and eats the remainder.
+        row = tk.Frame(self.scroll.inner, bg=bg)
+        row.pack(fill=tk.X, padx=pad, pady=(px(6), px(8)))
+        row.columnconfigure(0, weight=0)
+        row.columnconfigure(1, weight=1)
+        self.body = tk.Frame(row, bg=bg)
+        self.body.grid(row=0, column=0, sticky="new")
+        tk.Frame(row, bg=bg).grid(row=0, column=1, sticky="nsew")
+        if width:
+            cap, floor, last = px(width), px(420), [None]
+
+            def fit(event):
+                if event.width <= 1:
+                    return
+                size = max(floor, min(cap, event.width))
+                if size == last[0]:
+                    return
+                last[0] = size
+                row.columnconfigure(0, minsize=size)
+
+            row.bind("<Configure>", fit, add="+")
 
     def card(self, title, hint=None, pady=(0, 14)):
         card = Card(self.body, title=title, hint=hint)
@@ -1160,158 +1361,110 @@ class ResolvedRow(tk.Frame):
         self._source.configure(text=source)
 
 
-def _draw_icon(canvas, name, colour, size):
-    """The five glyphs the sidebar needs, drawn on a canvas.
+class TopNav(tk.Frame):
+    """The bar across the top: wordmark, the areas, and one word of state.
 
-    Stroke shapes on a 16 unit grid, scaled to `size`. No emoji and no icon
-    font: those either miss on a machine or arrive in the wrong weight.
+    It replaces the sidebar. A sidebar costs 238 px of width on every page and
+    buys a column of four words; up here the same four words cost 68 px of
+    height and the page gets the whole width back.
     """
-    canvas.delete("icon")
-    u = size / 16.0
-    w = max(1, round(1.6 * u))
 
-    def line(*points, cap="round"):
-        canvas.create_line(*[p * u for p in points], fill=colour, width=w,
-                           capstyle=cap, joinstyle="round", tags="icon")
-
-    def arc(x0, y0, x1, y1, start, extent):
-        canvas.create_arc(x0 * u, y0 * u, x1 * u, y1 * u, start=start, extent=extent,
-                          style="arc", outline=colour, width=w, tags="icon")
-
-    if name == "lock":
-        canvas.create_rectangle(3 * u, 7 * u, 13 * u, 14 * u, outline=colour,
-                                width=w, tags="icon")
-        arc(5, 2, 11, 9, 0, 180)
-    elif name == "batch":
-        line(2.5, 4.5, 13.5, 4.5)
-        line(2.5, 8, 13.5, 8)
-        line(2.5, 11.5, 9.5, 11.5)
-    elif name == "settings":
-        # Sliders, not a gear: a five unit cog fills in solid at this size.
-        line(2, 5.5, 13.5, 5.5)
-        line(2, 11, 13.5, 11)
-        for cx, cy in ((6, 5.5), (10, 11)):
-            r = 2.1 * u
-            canvas.create_oval(cx * u - r, cy * u - r, cx * u + r, cy * u + r,
-                               fill=canvas["bg"], outline=colour, width=w, tags="icon")
-    elif name in ("import", "export"):
-        line(2.5, 5, 6.5, 5); line(6.5, 5, 8, 6.8); line(8, 6.8, 13.5, 6.8)
-        canvas.create_rectangle(2.5 * u, 6.8 * u, 13.5 * u, 13.5 * u, outline=colour,
-                                width=w, tags="icon")
-        if name == "import":
-            line(8, 8.4, 8, 11.8); line(6.4, 10.2, 8, 11.8); line(9.6, 10.2, 8, 11.8)
-        else:
-            line(8, 11.8, 8, 8.4); line(6.4, 10, 8, 8.4); line(9.6, 10, 8, 8.4)
-
-
-class _NavItem(tk.Frame):
-    """One sidebar entry. Selected is a white card on the grey sidebar."""
-
-    def __init__(self, parent, label, on_click, bg=SURFACE, icon=None):
-        super().__init__(parent, bg=bg)
+    def __init__(self, parent, brand, items, command, bg=SURFACE):
+        super().__init__(parent, bg=bg, height=px(60))
         self._bg = bg
-        self._icon_name = icon
-        self._size = px(16)
+        self._command = command
+        self._items = {}
+
         row = tk.Frame(self, bg=bg)
-        row.pack(fill=tk.X, padx=px(11), pady=px(8))
-        self._row = row
-        self._canvas = None
-        if icon:
-            self._canvas = tk.Canvas(row, width=self._size, height=self._size, bg=bg,
-                                     highlightthickness=0, bd=0, cursor="hand2")
-            self._canvas.pack(side=tk.LEFT, padx=(0, px(9)))
-        self._label = tk.Label(row, text=label, bg=bg, fg=TEXT_DIM, font=f("nav"),
-                               anchor="w", cursor="hand2")
-        self._label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        for widget in (self, row, self._label) + ((self._canvas,) if self._canvas else ()):
-            widget.bind("<Button-1>", lambda _e: on_click())
-            widget.bind("<Enter>", self._enter)
-            widget.bind("<Leave>", self._leave)
-        self._active = False
-        self._corners = round_corners(self, px(8), outer_bg=bg)
-        self._paint(bg, TEXT_DIM)
+        row.pack(fill=tk.BOTH, expand=True, padx=px(26))
 
-    def _enter(self, _=None):
-        if not self._active:
-            self._paint(HOVER, TEXT)
+        logo = brand.header_logo(row, scale=SCALE)
+        if logo is not None:
+            logo.configure(bg=bg)
+            logo.pack(side=tk.LEFT, pady=px(11))
+        else:
+            tk.Label(row, text=brand.VENDOR.upper(), bg=bg, fg=TEXT,
+                     font=f("title")).pack(side=tk.LEFT)
 
-    def _leave(self, _=None):
-        if not self._active:
-            self._paint(self._bg, TEXT_DIM)
+        tk.Frame(row, bg=HAIRLINE, width=1).pack(side=tk.LEFT, fill=tk.Y,
+                                                 padx=px(18), pady=px(20))
 
-    def _paint(self, bg, fg):
-        self.configure(bg=bg)
-        self._row.configure(bg=bg)
-        self._label.configure(bg=bg, fg=fg)
-        # round_corners paints the canvas in the SURROUNDING colour and the arc
-        # in the widget's own. So the canvas keeps the sidebar grey and only the
-        # arc follows the fill; swapping the two turns the rounding into notches.
-        for corner in self._corners:
-            corner.configure(bg=self._bg)
-            corner.itemconfigure("all", fill=bg, outline=bg)
-        if self._canvas is not None:
-            self._canvas.configure(bg=bg)
-            _draw_icon(self._canvas, self._icon_name, fg, self._size)
+        for key, label in items:
+            chip = _Chip(row, label, lambda k=key: self._command(k), radius=9,
+                         outer=bg, pad=(13, 7))
+            chip.set_fill(bg, TEXT_FAINT)
+            chip.pack(side=tk.LEFT, padx=(0, px(2)))
+            self._items[key] = chip
 
-    def set_active(self, active):
-        self._active = active
-        self._paint(CARD if active else self._bg, TEXT if active else TEXT_DIM)
+        state = tk.Frame(row, bg=bg)
+        state.pack(side=tk.RIGHT)
+        self._dot = tk.Canvas(state, width=px(9), height=px(9), bg=bg,
+                              highlightthickness=0, bd=0)
+        self._dot.pack(side=tk.LEFT, padx=(0, px(8)))
+        self._state_var = tk.StringVar(value="")
+        tk.Label(state, textvariable=self._state_var, bg=bg, fg=TEXT_DIM,
+                 font=f("small")).pack(side=tk.LEFT)
+        self.set_state("", "idle")
+
+    def set_active(self, key):
+        for name, chip in self._items.items():
+            if name == key:
+                chip.set_fill(HOVER, TEXT)
+            else:
+                chip.set_fill(self._bg, TEXT_FAINT)
+
+    def set_label(self, key, text):
+        if key in self._items:
+            self._items[key].set_text(text)
+
+    def set_state(self, text, tone="idle"):
+        self._state_var.set(text)
+        colour = _TONE.get(tone, _TONE["idle"])[0]
+        self._dot.delete("all")
+        size = px(9)
+        self._dot.create_oval(0, 0, size, size, fill=colour, outline=colour)
 
 
 class Shell(tk.Frame):
     """
-    Application frame: a sidebar for navigation, a title bar that names the
-    current view, the view itself, and a status line at the bottom.
+    The application frame: one bar across the top, a title block, the page
+    itself, and a status line at the bottom. Every page lives in the same host
+    and only the topmost one is seen, so switching areas moves nothing.
     """
 
     def __init__(self, root, brand, product, version, nav, on_select):
         super().__init__(root, bg=BG)
         self._on_select = on_select
-        self._nav = {}
         # Copied, not referenced: set_subtitle writes here, and the caller's nav
         # list is usually a class attribute that must not pick up per-instance edits.
         self._pages = dict((entry["key"], dict(entry)) for entry in nav)
         self._active = None
         self._mounted = {}
 
-        side = tk.Frame(self, bg=SURFACE, width=px(238))
-        side.pack(side=tk.LEFT, fill=tk.Y)
-        side.pack_propagate(False)
-
-        head = tk.Frame(side, bg=SURFACE)
-        head.pack(fill=tk.X, padx=px(18), pady=(px(22), px(18)))
-        logo = brand.header_logo(head, scale=SCALE)
-        if logo is not None:
-            logo.pack(anchor="w")
-        else:
-            tk.Label(head, text=brand.VENDOR.upper(), bg=SURFACE, fg=TEXT,
-                     font=f("title")).pack(anchor="w")
-        tk.Label(head, text=product, bg=SURFACE, fg=TEXT_DIM, font=f("small"),
-                 anchor="w").pack(fill=tk.X, pady=(px(10), 0))
-
-        items = tk.Frame(side, bg=SURFACE)
-        items.pack(fill=tk.X, padx=px(12))
-        for entry in nav:
-            item = _NavItem(items, entry["label"], lambda k=entry["key"]: self.select(k),
-                            icon=entry.get("icon"))
-            item.pack(fill=tk.X, pady=px(2))
-            self._nav[entry["key"]] = item
-
-        foot = tk.Frame(side, bg=SURFACE)
-        foot.pack(side=tk.BOTTOM, fill=tk.X, padx=px(18), pady=px(18))
-        tk.Label(foot, text=f"v{version}", bg=SURFACE, fg=TEXT_FAINT,
-                 font=f("micro"), anchor="w").pack(fill=tk.X)
+        self.nav = TopNav(self, brand,
+                          [(entry["key"], entry["label"]) for entry in nav],
+                          self.select)
+        self.nav.pack(fill=tk.X)
+        self.nav.pack_propagate(False)
+        tk.Frame(self, bg=HAIRLINE, height=1).pack(fill=tk.X)
 
         main = tk.Frame(self, bg=BG)
-        main.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        main.pack(fill=tk.BOTH, expand=True)
 
         bar = tk.Frame(main, bg=BG)
-        bar.pack(fill=tk.X, padx=px(32), pady=(px(26), px(18)))
-        self._title = tk.Label(bar, text="", bg=BG, fg=TEXT, font=f("h1"), anchor="w")
-        self._title.pack(fill=tk.X)
-        self._subtitle = tk.Label(bar, text="", bg=BG, fg=TEXT_DIM, font=f("body"),
+        bar.pack(fill=tk.X, padx=px(34), pady=(px(24), px(16)))
+        titles = tk.Frame(bar, bg=BG)
+        titles.pack(fill=tk.X)
+        self._title = tk.Label(titles, text="", bg=BG, fg=TEXT, font=f("h1"),
+                               anchor="w")
+        self._title.pack(side=tk.LEFT)
+        # A page can hang one control up here, beside its own title: the
+        # backup page puts its ZIP/BIN switch there, the way the drawing does.
+        self.title_slot = tk.Frame(titles, bg=BG)
+        self.title_slot.pack(side=tk.RIGHT)
+        self._subtitle = tk.Label(bar, text="", bg=BG, fg=TEXT_FAINT, font=f("body"),
                                   anchor="nw", justify="left", wraplength=px(720))
-        self._subtitle.pack(fill=tk.X, pady=(px(4), 0))
+        self._subtitle.pack(fill=tk.X, pady=(px(5), 0))
         wrap_to_parent(self._subtitle, minimum=px(320), inset=px(8))
         # The header keeps room for the longest subtitle of all pages, always.
         # Two pages whose subtitles need a different number of lines used to
@@ -1320,7 +1473,7 @@ class Shell(tk.Frame):
         self._subtitle_lines = None
         bar.bind("<Configure>", self._reserve_header, add="+")
 
-        self.status = StatusBar(main, f"{brand.VENDOR}  ·  {product}")
+        self.status = StatusBar(main, f"{brand.VENDOR}  \u00b7  v{version}")
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
 
         self.host = tk.Frame(main, bg=BG)
@@ -1371,12 +1524,28 @@ class Shell(tk.Frame):
         if key == self._active:
             return
         self._active = key
-        for name, item in self._nav.items():
-            item.set_active(name == key)
+        self.nav.set_active(key)
         entry = self._pages[key]
         self._title.configure(text=entry.get("title", entry["label"]))
         self._subtitle.configure(text=entry.get("subtitle", ""))
         self._on_select(key)
+
+    def set_label(self, key, text):
+        """Rename an area. Used when the language changes."""
+        self._pages[key]["label"] = text
+        self.nav.set_label(key, text)
+
+    def set_title(self, key, title, subtitle=None, subtitles=None):
+        entry = self._pages[key]
+        entry["title"] = title
+        if subtitle is not None:
+            entry["subtitle"] = subtitle
+        if subtitles is not None:
+            entry["subtitles"] = subtitles
+        self._reserve_header()
+        if self._active == key:
+            self._title.configure(text=title)
+            self._subtitle.configure(text=entry.get("subtitle", ""))
 
     def set_subtitle(self, key, text):
         """Reword a page header when a setting changes what the page does."""

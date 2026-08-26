@@ -18,6 +18,7 @@ import sys
 import zipfile
 
 import dme_brand as brand
+from dme_text import t
 
 try:
     import tkinter as tk
@@ -342,9 +343,6 @@ META_FIELDS = [
     ("VehicleVIN", "VIN", "17 characters"),
 ]
 
-_TkBase = tk.Tk if TK_AVAILABLE else object
-
-
 class PartRow:
     """One row of the split table, laid out in the shared grid container."""
 
@@ -416,118 +414,154 @@ class PartRow:
             w.destroy()
 
 
-class AutoTunerTool(_TkBase):
-    def __init__(self):
-        super().__init__()
-        self.title(f"{APP_NAME} · {brand.VENDOR}")
-        self.configure(bg=ui.BG)
-        ui.init(self)
-        self.minsize(ui.px(900), ui.px(680))
-        brand.apply_window_icon(self)
+class BackupUI:
+    """The Backup area: one page, two directions, the same four steps in each.
 
+    It used to be a window with two sidebar pages. The two directions are now a
+    switch beside the page title, because they are the same job in reverse and
+    nobody has to hunt for the way back.
+    """
+
+    def __init__(self, app):
+        self.app = app
         self._archive_info: dict | None = None
         self._part_rows: list[PartRow] = []
         self._last_output: str | None = None
+        self._direction = "z2b"
 
-        self._build()
-        self._bind_shortcuts()
-
-    # ── Shell ────────────────────────────────────────────────────────────────
-
-    NAV = [
-        {"key": "z2b", "label": "ZIP → BIN", "title": "ZIP → BIN", "icon": "import",
-         "subtitle": "Concentrate every memory part of an AutoTuner .zip or .bak backup "
-                     "into one continuous .bin for your tuning software."},
-        {"key": "b2z", "label": "BIN → ZIP", "title": "BIN → ZIP", "icon": "export",
-         "subtitle": "Split a modified .bin back into its memory parts and package them "
-                     "as an AutoTuner compatible .zip backup."},
-    ]
-
-    def _build(self):
-        self.shell = ui.Shell(self, brand, APP_NAME, APP_VERSION, self.NAV,
-                              self._show_page)
-        self.shell.pack(fill=tk.BOTH, expand=True)
-        self.tabs = self.shell          # the pages still say tabs.select(...)
-        self.status = self.shell.status
-        self._page_host = self.shell.host
-
-        self.pages = {"z2b": self._build_zip_to_bin(), "b2z": self._build_bin_to_zip()}
-        self.shell.mount(self.pages)
-        self.shell.select("z2b")
-
-    def _show_page(self, key):
-        self.shell.show(key)
-
-    def _bind_shortcuts(self):
-        self.bind("<Control-o>", lambda _e: (self._browse_zip() if self._active() == "z2b"
-                                             else self._browse_bin()))
-        self.bind("<F5>", lambda _e: self._analyze_zip() if self._active() == "z2b" else None)
-        self.bind("<Control-Return>", lambda _e: (self._run_zip_to_bin()
-                                                  if self._active() == "z2b"
-                                                  else self._run_bin_to_zip()))
-
-    def _active(self) -> str:
-        # Every page stays mapped now, so no widget can answer this. The shell
-        # knows which one is on top.
-        return self.shell.active or "z2b"
-
-    # ── Page 1: ZIP → BIN ────────────────────────────────────────────────────
-
-    def _build_zip_to_bin(self):
-        page = ui.Page(self._page_host)
-        self._z2b_banner = page.banner
-
-        src = page.card("Source backup")
         self._z2b_zip_var = tk.StringVar()
-        self._z2b_path = ui.PathRow(src.body, "AutoTuner backup (.zip / .bak)",
-                                    self._z2b_zip_var, self._browse_zip,
-                                    hint="No file selected. Ctrl+O to browse")
-        self._z2b_path.pack(fill=tk.X)
-        self._z2b_zip_var.trace_add('write', lambda *_: self._on_zip_path_changed())
-
-        self._z2b_preview_card = page.card("Archive contents", hint="nothing loaded")
-        self._z2b_log = ui.LogView(self._z2b_preview_card.body, height=13)
-        self._z2b_log.pack(fill=tk.BOTH, expand=True)
-        tools = tk.Frame(self._z2b_preview_card.body, bg=ui.CARD)
-        tools.pack(fill=tk.X, pady=(10, 0))
-        tk.Label(tools, text="Parts are listed in the exact order they are written "
-                             "into the .bin file.",
-                 bg=ui.CARD, fg=ui.TEXT_FAINT, font=ui.f("small")).pack(side=tk.LEFT)
-        ui.button(tools, "Analyze  ⟳", self._analyze_zip, variant="secondary",
-                  size="sm").pack(side=tk.RIGHT)
-        self._z2b_log.set_text("Select a .zip or .bak backup to inspect its parts.", "dim")
-
-        out = page.card("Output")
         self._z2b_out_var = tk.StringVar()
-        self._z2b_out_path = ui.PathRow(out.body, "Combined binary (.bin)",
-                                        self._z2b_out_var, self._browse_zip_output,
-                                        browse_text="Save as…")
-        self._z2b_out_path.pack(fill=tk.X)
+        self._b2z_bin_var = tk.StringVar()
+        self._b2z_out_var = tk.StringVar()
+        self._z2b_summary = tk.StringVar()
+        self._b2z_summary = tk.StringVar()
+        self._b2z_total_var = tk.StringVar()
+        self._meta_vars = {key: tk.StringVar() for key, _l, _p in META_FIELDS}
+        self._traced = False
 
-        self._z2b_summary = tk.StringVar(value="Waiting for a backup file")
-        self._action_bar(page, self._z2b_summary, "Concentrate to .bin  ⬇",
-                         self._run_zip_to_bin)
+    # ── the page ────────────────────────────────────────────────────────────
+    def build_page(self):
+        page = ui.Page(self.app.host, width=900)
+        self.page = page
+        self.banner = page.banner
+        self._z2b_banner = page.banner
+        self._b2z_banner = page.banner
+
+        self.switch = ui.Segmented(
+            self.app.shell.title_slot,
+            [("z2b", t("backup.seg.z2b")), ("b2z", t("backup.seg.b2z"))],
+            command=self._set_direction, bg=ui.BG)
+        self.switch.pack()
+
+        self._z2b = tk.Frame(page.body, bg=ui.BG)
+        self._b2z = tk.Frame(page.body, bg=ui.BG)
+        self._build_zip_to_bin(self._z2b)
+        self._build_bin_to_zip(self._b2z)
+
+        self._summary = tk.StringVar()
+        page.summary(self._summary)
+        self.btn_run = ui.button(page.action_row, t("backup.z2b.btn"), self._run,
+                                 variant="primary", size="lg", bg=ui.SURFACE)
+        self.btn_run.pack(side=tk.RIGHT)
+        self._show_direction()
         return page
 
-    @staticmethod
-    def _action_bar(page, summary_var, label, command):
-        page.summary(summary_var)
-        btn = ui.button(page.action_row, label, command, variant="primary", size="lg")
-        btn.pack(side=tk.RIGHT)
-        return btn
+    def after_mount(self):
+        if not self._traced:
+            self._z2b_zip_var.trace_add("write", lambda *_: self._on_zip_path_changed())
+            self._b2z_bin_var.trace_add("write", lambda *_: self._on_bin_path_changed())
+            self._traced = True
+        self._refresh_parts()
+        self._on_zip_path_changed()
+        self.switch.select(self._direction, notify=False)
+        self._show_direction()
+
+    def on_shown(self):
+        self.app.shell.set_subtitle("backup", t(f"backup.sub.{self._direction}"))
+
+    def _set_direction(self, key):
+        self._direction = key
+        self._show_direction()
+        self.on_shown()
+
+    def _show_direction(self):
+        for frame in (self._z2b, self._b2z):
+            frame.pack_forget()
+        target = self._z2b if self._direction == "z2b" else self._b2z
+        target.pack(fill=tk.X)
+        self.btn_run.configure(text=t(f"backup.{self._direction}.btn"))
+        self._summary.set(self._z2b_summary.get() if self._direction == "z2b"
+                          else self._b2z_summary.get())
+
+    def _run(self):
+        if self._direction == "z2b":
+            self._run_zip_to_bin()
+        else:
+            self._run_bin_to_zip()
+
+    def _file_row(self, parent, variable, on_browse, hint="", browse=None):
+        holder = tk.Frame(parent, bg=ui.BG)
+        row = tk.Frame(holder, bg=ui.BG)
+        row.pack(fill=tk.X)
+        field = ui.entry(row, variable)
+        field.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=ui.px(7))
+        ui.button(row, browse or t("word.choose"), on_browse, variant="secondary",
+                  size="md", bg=ui.BG).pack(side=tk.LEFT, padx=(ui.px(9), 0))
+        label = tk.Label(holder, text=hint, bg=ui.BG, fg=ui.TEXT_FAINT,
+                         font=ui.f("small"), anchor="w", justify="left")
+        label.pack(fill=tk.X, pady=(ui.px(7), 0))
+        ui.wrap_to_parent(label)
+        holder.hint = label
+        return holder
+
+    # ── ZIP to BIN ──────────────────────────────────────────────────────────
+    def _build_zip_to_bin(self, parent):
+        flow = ui.Flow(parent)
+        flow.pack(fill=tk.X)
+        self._z2b_flow = flow
+
+        step = flow.step(t("backup.z2b.step1"), state="now")
+        self._z2b_step1 = step
+        self._z2b_path = self._file_row(step.body, self._z2b_zip_var, self._browse_zip,
+                                        hint=t("backup.z2b.step1.hint"))
+        self._z2b_path.pack(fill=tk.X)
+
+        step = flow.step(t("backup.z2b.step2"))
+        self._z2b_step2 = step
+        self._z2b_log = ui.LogView(step.body, height=11)
+        self._z2b_log.pack(fill=tk.BOTH, expand=True)
+        self._z2b_log.set_text(t("backup.z2b.step2.idle"), "dim")
+
+        step = flow.step(t("backup.z2b.step3"))
+        self._z2b_step3 = step
+        self._z2b_out_path = self._file_row(step.body, self._z2b_out_var,
+                                            self._browse_zip_output,
+                                            hint=t("backup.z2b.step3.hint"),
+                                            browse=t("word.save"))
+        self._z2b_out_path.pack(fill=tk.X)
+
+        step = flow.step(t("backup.z2b.step4"))
+        self._z2b_step4 = step
+        note = tk.Label(step.body, text=t("backup.z2b.foot"), bg=ui.BG,
+                        fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w", justify="left")
+        note.pack(fill=tk.X)
+        ui.wrap_to_parent(note)
 
     def _on_zip_path_changed(self):
         path = self._z2b_zip_var.get().strip()
         if not path:
-            self._z2b_path.set_hint("No file selected. Ctrl+O to browse")
+            self._z2b_path.hint.configure(text=t("backup.z2b.step1.hint"),
+                                          fg=ui.TEXT_FAINT)
+            self._z2b_step1.set_state("now")
         elif not os.path.exists(path):
-            self._z2b_path.set_hint("File not found", "error")
+            self._z2b_path.hint.configure(text=t("word.not_found"), fg=ui.ERR)
+            self._z2b_step1.set_state("err")
         else:
             self._analyze_zip()
 
     def _browse_zip(self):
         path = filedialog.askopenfilename(
-            title="Select AutoTuner backup",
+            title=t("dlg.zip"),
             filetypes=[("AutoTuner backup", "*.zip *.bak"), ("All files", "*.*")])
         if path:
             self._z2b_zip_var.set(path)
@@ -536,39 +570,47 @@ class AutoTunerTool(_TkBase):
 
     def _browse_zip_output(self):
         path = filedialog.asksaveasfilename(
-            title="Save combined .bin", defaultextension=".bin",
+            title=t("dlg.save_bin"), defaultextension=".bin",
             filetypes=[("Binary file", "*.bin"), ("All files", "*.*")])
         if path:
             self._z2b_out_var.set(path)
+
+    def _z2b_state(self, ok):
+        self._z2b_step1.set_state("done" if ok else "now")
+        self._z2b_step2.set_state("done" if ok else "next")
+        self._z2b_step3.set_state("done" if ok and self._z2b_out_var.get().strip()
+                                  else ("now" if ok else "next"))
+        self._z2b_step4.set_state("now" if ok and self._z2b_out_var.get().strip()
+                                  else "next")
 
     def _analyze_zip(self):
         zip_path = self._z2b_zip_var.get().strip()
         if not zip_path or not os.path.exists(zip_path):
             self._archive_info = None
-            self._z2b_log.set_text("Select a .zip or .bak backup to inspect its parts.", "dim")
-            self._z2b_preview_card.set_hint("nothing loaded")
-            self._z2b_path.set_hint("No file selected. Ctrl+O to browse")
-            self._z2b_summary.set("Waiting for a backup file")
+            self._z2b_log.set_text(t("backup.z2b.step2.idle"), "dim")
+            self._z2b_summary.set(t("err.no_zip"))
+            self._z2b_state(False)
             return
         try:
             info = read_archive_info(zip_path)
         except zipfile.BadZipFile:
             self._archive_info = None
             self._z2b_log.set_text("Not a valid ZIP archive.", "error")
-            self._z2b_preview_card.set_hint("invalid", "error")
-            self._z2b_path.set_hint("Unreadable archive", "error")
-            self.status.set("Invalid archive", "error")
+            self._z2b_path.hint.configure(text="Not a valid ZIP archive.", fg=ui.ERR)
+            self._z2b_step1.set_state("err")
+            self.app.set_status(t("word.failed"), "error")
             return
-        except Exception as e:
+        except Exception as exc:
             self._archive_info = None
-            self._z2b_log.set_text(f"Error: {e}", "error")
-            self.status.set("Error", "error")
+            self._z2b_log.set_text(str(exc), "error")
+            self._z2b_step1.set_state("err")
+            self.app.set_status(t("word.failed"), "error")
             return
 
         self._archive_info = info
         self._z2b_log.clear()
         self._z2b_log.write(f"{'#':>2}  {'PART':<24}{'SIZE':>12}{'OFFSET':>14}", "dim")
-        self._z2b_log.write("─" * 54, "dim")
+        self._z2b_log.write("\u2500" * 54, "dim")
         for i, part in enumerate(info['parts'], 1):
             self._z2b_log.write(
                 f"{i:>2}  {part['name']:<24}{format_bytes(part['size']):>12}"
@@ -577,7 +619,7 @@ class AutoTunerTool(_TkBase):
             self._z2b_log.write(
                 f"    {extra['name']:<24}{format_bytes(extra['size']):>12}"
                 f"{'metadata':>14}", "dim")
-        self._z2b_log.write("─" * 54, "dim")
+        self._z2b_log.write("\u2500" * 54, "dim")
         self._z2b_log.write(f"    {'Total binary data':<24}"
                             f"{format_bytes(info['total']):>12}"
                             f"{info['total']:>14,}", "ok")
@@ -594,136 +636,136 @@ class AutoTunerTool(_TkBase):
             if meta.get('VehicleVIN'):
                 self._z2b_log.write(f"    VIN     : {meta['VehicleVIN']}")
 
-        self._z2b_preview_card.set_hint(
-            f"{info['count']} part(s) · {format_bytes(info['total'])}", "ok")
-        self._z2b_path.set_hint(
-            f"{os.path.basename(zip_path)} · {info['count']} part(s) · "
-            f"{format_bytes(info['total'])}", "ok")
+        self._z2b_path.hint.configure(
+            text=f"{os.path.basename(zip_path)} \u00b7 {format_bytes(info['total'])}",
+            fg=ui.OK)
+        self._z2b_step2.set_note(f"{info['count']} \u00b7 {format_bytes(info['total'])}")
         self._z2b_log.scroll_top()
-        self._z2b_summary.set(f"{info['count']} part(s) · {info['total']:,} bytes ready "
-                              f"to concentrate")
-        self.status.set(f"Analyzed {os.path.basename(zip_path)}", "ok")
+        self._z2b_summary.set(f"{info['count']} \u00b7 {info['total']:,} {t('word.bytes')}")
+        self._z2b_state(True)
+        if self._direction == "z2b":
+            self._summary.set(self._z2b_summary.get())
+            self.app.set_status(t("word.ready"), "ok")
 
     def _run_zip_to_bin(self):
         zip_path = self._z2b_zip_var.get().strip()
         out_path = self._z2b_out_var.get().strip()
         if not zip_path:
-            self._z2b_banner.show("error", "Select an AutoTuner .zip/.bak backup first.")
+            self.banner.show("error", t("err.no_zip"))
             return
         if not out_path:
-            self._z2b_banner.show("error", "Choose where the combined .bin should be saved.")
+            self.banner.show("error", t("backup.z2b.step3.hint"))
             return
 
-        self.status.set("Concentrating…", "busy")
-        self._z2b_banner.show("busy", "Working…")
-        self.update_idletasks()
+        self.app.set_status(t("word.running"), "busy")
+        self.banner.show("busy", t("word.running"))
+        self.app.update_idletasks()
 
         ok, msg, parts = zip_to_bin(zip_path, out_path)
         how_to = (self._archive_info or {}).get("how_to", "")
         if ok:
             remember_layout(parts, os.path.basename(zip_path), how_to=how_to)
-            self._z2b_banner.show("ok", f"{msg}\n{out_path}",
-                                  action_text="Show in folder",
-                                  action=lambda: ui.reveal_in_file_manager(out_path))
-            self.status.set(f"Done · {os.path.basename(out_path)}", "ok")
-            self._z2b_summary.set(f"{len(parts)} part(s) written · "
-                                  f"{os.path.getsize(out_path):,} bytes")
+            self.banner.show("ok", msg, action_text=t("word.open_folder"),
+                             action=lambda: ui.reveal_in_file_manager(out_path))
+            self.app.set_status(t("word.done"), "ok")
+            self._z2b_step4.set_state("done")
+            self._z2b_step4.set_note(os.path.basename(out_path))
+            self._z2b_summary.set(f"{len(parts)} \u00b7 "
+                                  f"{os.path.getsize(out_path):,} {t('word.bytes')}")
+            self._summary.set(self._z2b_summary.get())
         else:
-            self._z2b_banner.show("error", msg)
-            self.status.set("Failed", "error")
+            self.banner.show("error", msg)
+            self._z2b_step4.set_state("err")
+            self.app.set_status(t("word.failed"), "error")
 
-    # ── Page 2: BIN → ZIP ────────────────────────────────────────────────────
+    # ── BIN to ZIP ──────────────────────────────────────────────────────────
+    def _build_bin_to_zip(self, parent):
+        flow = ui.Flow(parent)
+        flow.pack(fill=tk.X)
+        self._b2z_flow = flow
 
-    def _build_bin_to_zip(self):
-        page = ui.Page(self._page_host)
-        self._b2z_banner = page.banner
-
-        src = page.card("Source binary")
-        self._b2z_bin_var = tk.StringVar()
-        self._b2z_path = ui.PathRow(src.body, "Modified binary (.bin)", self._b2z_bin_var,
-                                    self._browse_bin,
-                                    hint="No file selected. Ctrl+O to browse")
+        step = flow.step(t("backup.b2z.step1"), state="now")
+        self._b2z_step1 = step
+        self._b2z_path = self._file_row(step.body, self._b2z_bin_var, self._browse_bin,
+                                        hint=t("backup.b2z.step1.hint"))
         self._b2z_path.pack(fill=tk.X)
-        self._b2z_bin_var.trace_add('write', lambda *_: self._on_bin_path_changed())
 
-        split = page.card("Split configuration", hint="0 parts")
-        self._split_card = split
-
-        toolbar = tk.Frame(split.body, bg=ui.CARD)
-        toolbar.pack(fill=tk.X, pady=(0, 12))
-        ui.button(toolbar, "Load from ZIP template", self._load_parts_from_zip,
-                  variant="secondary", size="sm").pack(side=tk.LEFT)
+        step = flow.step(t("backup.b2z.step2"))
+        self._b2z_step2 = step
+        toolbar = tk.Frame(step.body, bg=ui.BG)
+        toolbar.pack(fill=tk.X, pady=(0, ui.px(10)))
+        ui.button(toolbar, t("backup.parts.preset"), self._load_parts_from_zip,
+                  variant="secondary", size="sm", bg=ui.BG).pack(side=tk.LEFT)
         for preset in PRESETS:
             ui.button(toolbar, preset, lambda p=preset: self._load_preset(p),
-                      variant="secondary", size="sm").pack(side=tk.LEFT, padx=(8, 0))
-        ui.button(toolbar, "+ Add part", self._add_part_row, variant="ghost",
-                  size="sm", bg=ui.CARD).pack(side=tk.RIGHT)
+                      variant="secondary", size="sm",
+                      bg=ui.BG).pack(side=tk.LEFT, padx=(ui.px(7), 0))
+        ui.button(toolbar, t("backup.parts.add"), self._add_part_row, variant="ghost",
+                  size="sm", bg=ui.BG).pack(side=tk.RIGHT)
 
-        head = tk.Frame(split.body, bg=ui.CARD)
+        head = tk.Frame(step.body, bg=ui.BG)
         head.pack(fill=tk.X)
-        for col, (text, weight, anchor, width) in enumerate([
-                ("#", 0, "e", 2), ("", 0, "w", 1), ("PART FILENAME", 3, "w", 0),
-                ("SIZE (BYTES)", 2, "e", 0), ("", 0, "e", 9), ("", 0, "e", 3)]):
-            lbl = tk.Label(head, text=text, bg=ui.CARD, fg=ui.TEXT_FAINT,
+        for col, (label, weight, anchor, width) in enumerate([
+                ("#", 0, "e", 2), ("", 0, "w", 1),
+                (t("backup.parts.name").upper(), 3, "w", 0),
+                (t("backup.parts.size").upper(), 2, "e", 0),
+                ("", 0, "e", 9), ("", 0, "e", 3)]):
+            lbl = tk.Label(head, text=label, bg=ui.BG, fg=ui.TEXT_FAINT,
                            font=ui.f("micro"), anchor=anchor)
             lbl.grid(row=0, column=col, sticky="ew",
                      padx=(0, 6) if col == 0 else (10 if col in (3, 4) else 0, 0))
             if width:
                 lbl.config(width=width)
             head.grid_columnconfigure(col, weight=weight)
-        ui.hr(split.body, bg=ui.BORDER, pady=(4, 2))
+        ui.hr(step.body, bg=ui.BORDER_SOFT, pady=(ui.px(4), ui.px(2)))
 
-        self._parts_table = tk.Frame(split.body, bg=ui.CARD)
+        self._parts_table = tk.Frame(step.body, bg=ui.BG)
         self._parts_table.pack(fill=tk.X)
         for col, weight in ((0, 0), (1, 0), (2, 3), (3, 2), (4, 0), (5, 0)):
             self._parts_table.grid_columnconfigure(col, weight=weight)
-        self._parts_empty = tk.Label(
-            self._parts_table,
-            text="No parts configured. Load a template, pick a preset, or add rows.",
-            bg=ui.CARD, fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w", pady=14)
+        self._parts_empty = tk.Label(self._parts_table, text="", bg=ui.BG,
+                                     fg=ui.TEXT_FAINT, font=ui.f("small"),
+                                     anchor="w", pady=ui.px(14), justify="left")
 
-        self._split_canvas = tk.Canvas(split.body, bg=ui.CARD, height=10,
+        self._split_canvas = tk.Canvas(step.body, bg=ui.BG, height=ui.px(10),
                                        highlightthickness=0, bd=0)
-        self._split_canvas.pack(fill=tk.X, pady=(14, 8))
+        self._split_canvas.pack(fill=tk.X, pady=(ui.px(14), ui.px(8)))
         self._split_canvas.bind("<Configure>", lambda _e: self._draw_split_bar())
 
-        totals = tk.Frame(split.body, bg=ui.CARD)
+        totals = tk.Frame(step.body, bg=ui.BG)
         totals.pack(fill=tk.X)
-        self._b2z_total_var = tk.StringVar(value="Parts 0 B  ·  File 0 B")
-        tk.Label(totals, textvariable=self._b2z_total_var, bg=ui.CARD, fg=ui.TEXT_DIM,
+        tk.Label(totals, textvariable=self._b2z_total_var, bg=ui.BG, fg=ui.TEXT_DIM,
                  font=ui.f("small")).pack(side=tk.LEFT)
-        self._b2z_match = tk.Label(totals, text="", bg=ui.CARD, font=ui.f("small"))
+        self._b2z_match = tk.Label(totals, text="", bg=ui.BG, font=ui.f("small"))
         self._b2z_match.pack(side=tk.RIGHT)
 
-        meta_card = page.card("Vehicle / ECU metadata",
-                              hint="optional, written to contents.ini")
-        grid = tk.Frame(meta_card.body, bg=ui.CARD)
-        grid.pack(fill=tk.X)
-        self._meta_vars = {}
-        for i, (key, label, placeholder) in enumerate(META_FIELDS):
-            var = tk.StringVar()
-            self._meta_vars[key] = var
-            cell = ui.LabeledEntry(grid, f"{label} ({placeholder})", var)
-            cell.grid(row=i // 3, column=i % 3, sticky="ew",
-                      padx=(0 if i % 3 == 0 else 12, 0), pady=(0, 10))
-        for col in range(3):
-            grid.grid_columnconfigure(col, weight=1, uniform="meta")
-
-        out = page.card("Output")
-        self._b2z_out_var = tk.StringVar()
-        self._b2z_out_path = ui.PathRow(out.body, "AutoTuner backup (.zip)",
-                                        self._b2z_out_var, self._browse_zip_out,
-                                        browse_text="Save as…")
+        step = flow.step(t("backup.b2z.step3"))
+        self._b2z_step3 = step
+        self._b2z_out_path = self._file_row(step.body, self._b2z_out_var,
+                                            self._browse_zip_out,
+                                            hint=t("backup.b2z.foot"),
+                                            browse=t("word.save"))
         self._b2z_out_path.pack(fill=tk.X)
 
-        self._b2z_summary = tk.StringVar(value="Waiting for a .bin file")
-        self._action_bar(page, self._b2z_summary, "Split & package to .zip  ⬆",
-                         self._run_bin_to_zip)
-        self._refresh_parts()
-        return page
+        step = flow.step(t("backup.b2z.step4"))
+        self._b2z_step4 = step
+        meta = ui.Collapsible(step.body, t("backup.meta"), bg=ui.BG)
+        meta.pack(fill=tk.X)
+        grid = tk.Frame(meta.body, bg=ui.BG)
+        grid.pack(fill=tk.X, pady=(ui.px(8), 0))
+        for i, (key, label, placeholder) in enumerate(META_FIELDS):
+            cell = ui.LabeledEntry(grid, f"{label} ({placeholder})",
+                                   self._meta_vars[key], bg=ui.BG)
+            cell.grid(row=i // 3, column=i % 3, sticky="ew",
+                      padx=(0 if i % 3 == 0 else ui.px(12), 0), pady=(0, ui.px(10)))
+        for col in range(3):
+            grid.grid_columnconfigure(col, weight=1, uniform="meta")
+        hint = tk.Label(step.body, text=t("backup.meta.hint"), bg=ui.BG,
+                        fg=ui.TEXT_FAINT, font=ui.f("small"), anchor="w", justify="left")
+        hint.pack(fill=tk.X, pady=(ui.px(8), 0))
+        ui.wrap_to_parent(hint)
 
     # ── Split table plumbing ────────────────────────────────────────────────
-
     def _add_part_row(self, name="", size=0):
         row = PartRow(self._parts_table, name=name, size=size,
                       on_change=self._update_totals)
@@ -751,11 +793,9 @@ class AutoTunerTool(_TkBase):
             if size and not layout_for_size(size) and not preset_for_size(size):
                 self._empty_hint(size)
             else:
-                self._parts_empty.config(
-                    text="No parts configured. Load a template, pick a preset, "
-                         "or add rows.")
+                self._parts_empty.config(text=t("backup.parts.empty"))
             self._parts_empty.grid(row=0, column=0, columnspan=6, sticky="ew")
-        self._split_card.set_hint(f"{len(self._part_rows)} part(s)")
+        self._b2z_step2.set_note(str(len(self._part_rows)) if self._part_rows else "")
         self._update_totals()
 
     def _bin_size(self) -> int:
@@ -766,19 +806,30 @@ class AutoTunerTool(_TkBase):
         total = sum(row.size for row in self._part_rows)
         file_size = self._bin_size()
         self._b2z_total_var.set(
-            f"Parts {total:,} B ({format_bytes(total)})  ·  "
-            f"File {file_size:,} B ({format_bytes(file_size)})")
+            f"{t('backup.parts.sum')} {total:,} B ({format_bytes(total)})  \u00b7  "
+            f"{format_bytes(file_size)}")
+        ready = False
         if file_size == 0:
             self._b2z_match.config(text="")
         elif total == file_size:
-            self._b2z_match.config(text="✓  sizes match", fg=ui.OK)
-            self._b2z_summary.set(f"{len(self._part_rows)} part(s) · {total:,} bytes · ready")
-        elif total > file_size:
-            self._b2z_match.config(text=f"✕  overflow by {total - file_size:,} B", fg=ui.ERR)
-            self._b2z_summary.set(f"Parts exceed the file by {total - file_size:,} bytes")
+            self._b2z_match.config(text="\u2713  " + t("backup.parts.match"), fg=ui.OK)
+            self._b2z_summary.set(f"{len(self._part_rows)} \u00b7 {total:,} "
+                                  f"{t('word.bytes')}")
+            ready = True
         else:
-            self._b2z_match.config(text=f"✕  missing {file_size - total:,} B", fg=ui.ERR)
-            self._b2z_summary.set(f"{file_size - total:,} bytes still unassigned")
+            delta = f"{abs(total - file_size):,}"
+            self._b2z_match.config(text="\u2715  " + t("backup.parts.mismatch",
+                                                      delta=delta), fg=ui.ERR)
+            self._b2z_summary.set(t("backup.parts.mismatch", delta=delta))
+        self._b2z_step1.set_state("done" if file_size else "now")
+        self._b2z_step2.set_state("done" if ready else
+                                  ("err" if file_size and self._part_rows else "next"))
+        self._b2z_step3.set_state("done" if ready and self._b2z_out_var.get().strip()
+                                  else ("now" if ready else "next"))
+        self._b2z_step4.set_state("now" if ready and self._b2z_out_var.get().strip()
+                                  else "next")
+        if self._direction == "b2z":
+            self._summary.set(self._b2z_summary.get())
         self._draw_split_bar()
 
     def _draw_split_bar(self):
@@ -787,31 +838,34 @@ class AutoTunerTool(_TkBase):
         width = canvas.winfo_width()
         if width <= 1:
             return
+        height = ui.px(10)
         total = sum(row.size for row in self._part_rows)
         file_size = self._bin_size()
         scale_total = max(total, file_size, 1)
-        canvas.create_rectangle(0, 0, width, 10, fill=ui.FIELD, outline="")
+        canvas.create_rectangle(0, 0, width, height, fill=ui.FIELD, outline="")
         x = 0.0
         for row in self._part_rows:
             if row.size <= 0:
                 continue
             w = width * row.size / scale_total
-            canvas.create_rectangle(x, 0, x + w, 10, fill=row.colour, outline="")
+            canvas.create_rectangle(x, 0, x + w, height, fill=row.colour, outline="")
             x += w
         if file_size and total > file_size:
             over_x = width * file_size / scale_total
-            canvas.create_rectangle(over_x, 0, width, 10, outline=ui.ERR, width=1)
+            canvas.create_rectangle(over_x, 0, width, height, outline=ui.ERR, width=1)
 
     def _on_bin_path_changed(self):
         path = self._b2z_bin_var.get().strip()
         if not path:
-            self._b2z_path.set_hint("No file selected. Ctrl+O to browse")
+            self._b2z_path.hint.configure(text=t("backup.b2z.step1.hint"),
+                                          fg=ui.TEXT_FAINT)
         elif not os.path.exists(path):
-            self._b2z_path.set_hint("File not found", "error")
+            self._b2z_path.hint.configure(text=t("word.not_found"), fg=ui.ERR)
         else:
             size = os.path.getsize(path)
-            self._b2z_path.set_hint(f"{os.path.basename(path)} · {size:,} bytes "
-                                    f"({format_bytes(size)})", "ok")
+            self._b2z_path.hint.configure(
+                text=f"{os.path.basename(path)} \u00b7 {size:,} {t('word.bytes')} "
+                     f"({format_bytes(size)})", fg=ui.OK)
             self._auto_layout(size)
         self._update_totals()
 
@@ -825,36 +879,31 @@ class AutoTunerTool(_TkBase):
             for part in parts:
                 self._add_part_row(name=part["name"], size=part["size"])
             self._refresh_parts()
-            origin = f" from {label}" if label else ""
-            self._b2z_banner.show("ok", f"Layout restored{origin} · {len(parts)} part(s), "
-                                        f"sizes match.")
-            self.status.set(f"Layout restored · {len(parts)} part(s)", "ok")
+            self.banner.show("ok", t("backup.parts.restored", n=len(parts),
+                                     source=label or t("word.manual")))
+            self.app.set_status(t("word.ready"), "ok")
             return
         candidates = presets_for_size(size)
         if candidates:
             self._load_preset(candidates[0])
             if len(candidates) > 1:
-                # Same split either way - but the ECU name goes into the
+                # Same split either way, but the ECU name goes into the
                 # customer's contents.ini, so do not let it be a silent guess.
-                others = ", ".join(candidates[1:])
-                self._b2z_banner.show(
-                    "warn", f"This size fits {' and '.join(candidates)}. The split is "
-                            f"the same, {candidates[0]} was filled in. Check the ECU "
-                            f"field if this is a {others}.")
+                self.banner.show("warn", t("backup.parts.ambiguous",
+                                           all=" / ".join(candidates),
+                                           picked=candidates[0]))
             else:
-                self._b2z_banner.show("info", f"File size matches the {candidates[0]} "
-                                              f"layout, preset applied.")
+                self.banner.show("info", t("backup.parts.preset_applied",
+                                           name=candidates[0]))
             return
         self._empty_hint(size)
 
     def _empty_hint(self, size: int):
-        self._parts_empty.config(
-            text=f"{size:,} bytes match no preset. Open the original AutoTuner backup "
-                 f"with “Load from ZIP template”, then this layout is remembered.")
+        self._parts_empty.config(text=t("backup.parts.unknown", size=f"{size:,}"))
 
     def _browse_bin(self):
         path = filedialog.askopenfilename(
-            title="Select .bin file",
+            title=t("dlg.bin"),
             filetypes=[("Binary file", "*.bin"), ("All files", "*.*")])
         if not path:
             return
@@ -864,21 +913,21 @@ class AutoTunerTool(_TkBase):
 
     def _browse_zip_out(self):
         path = filedialog.asksaveasfilename(
-            title="Save AutoTuner .zip backup", defaultextension=".zip",
+            title=t("dlg.save_zip"), defaultextension=".zip",
             filetypes=[("AutoTuner backup", "*.zip"), ("All files", "*.*")])
         if path:
             self._b2z_out_var.set(path)
 
     def _load_parts_from_zip(self):
         path = filedialog.askopenfilename(
-            title="Select an AutoTuner backup as template",
+            title=t("dlg.zip"),
             filetypes=[("AutoTuner backup", "*.zip *.bak"), ("All files", "*.*")])
         if not path:
             return
         try:
             info = read_archive_info(path)
-        except Exception as e:
-            self._b2z_banner.show("error", f"Could not read the ZIP template: {e}")
+        except Exception as exc:
+            self.banner.show("error", str(exc))
             return
         remember_layout(info['parts'], os.path.basename(path),
                         how_to=info.get('how_to', ''))
@@ -889,9 +938,9 @@ class AutoTunerTool(_TkBase):
             if info['meta'].get(key):
                 var.set(info['meta'][key])
         self._refresh_parts()
-        self._b2z_banner.show("ok", f"Loaded {info['count']} part(s) and metadata from "
-                                    f"{os.path.basename(path)}")
-        self.status.set(f"Template loaded · {os.path.basename(path)}", "ok")
+        self.banner.show("ok", t("backup.parts.restored", n=info['count'],
+                                 source=os.path.basename(path)))
+        self.app.set_status(t("word.ready"), "ok")
 
     def _load_preset(self, name):
         self._clear_part_rows()
@@ -901,28 +950,27 @@ class AutoTunerTool(_TkBase):
             if key in self._meta_vars:
                 self._meta_vars[key].set(value)
         self._refresh_parts()
-        total = sum(s for _, s in PRESETS[name])
-        self.status.set(f"{name} preset · {len(PRESETS[name])} parts · {total:,} bytes", "ok")
+        self.app.set_status(t("backup.parts.preset_applied", name=name), "ok")
 
     def _run_bin_to_zip(self):
         bin_path = self._b2z_bin_var.get().strip()
         out_path = self._b2z_out_var.get().strip()
 
         if not bin_path:
-            self._b2z_banner.show("error", "Select a source .bin file first.")
+            self.banner.show("error", t("err.no_bin"))
             return
         if not out_path:
-            self._b2z_banner.show("error", "Choose where the .zip backup should be saved.")
+            self.banner.show("error", t("backup.b2z.step3"))
             return
         if not self._part_rows:
-            self._b2z_banner.show("error", "Add at least one part. Use a preset or a ZIP template.")
+            self.banner.show("error", t("err.no_parts"))
             return
 
         parts_config = []
         for i, row in enumerate(self._part_rows, 1):
             part = row.get()
             if part is None:
-                self._b2z_banner.show("error", f"Part {i} has a missing or invalid name/size.")
+                self.banner.show("error", t("backup.parts.bad_row", n=i))
                 return
             parts_config.append(part)
 
@@ -939,39 +987,33 @@ class AutoTunerTool(_TkBase):
             'hardware': 'Autotuner',
         }
 
-        self.status.set("Packaging…", "busy")
-        self._b2z_banner.show("busy", "Working…")
-        self.update_idletasks()
+        self.app.set_status(t("word.running"), "busy")
+        self.banner.show("busy", t("word.running"))
+        self.app.update_idletasks()
 
-        # The page belongs to the archive this .bin came out of - look it up by
-        # the size that identifies that archive.
+        # The how-to page belongs to the archive this .bin came out of, so it is
+        # looked up by the size that identifies that archive.
         ok, msg = bin_to_zip(
             bin_path, out_path, parts_config, meta,
             how_to_html=remembered_how_to(sum(p['size'] for p in parts_config)))
         if ok:
-            self._b2z_banner.show("ok", f"{msg}\n{out_path}",
-                                  action_text="Show in folder",
-                                  action=lambda: ui.reveal_in_file_manager(out_path))
-            self.status.set(f"Done · {os.path.basename(out_path)}", "ok")
+            self.banner.show("ok", msg, action_text=t("word.open_folder"),
+                             action=lambda: ui.reveal_in_file_manager(out_path))
+            self.app.set_status(t("word.done"), "ok")
+            self._b2z_step4.set_state("done")
+            self._b2z_step4.set_note(os.path.basename(out_path))
         else:
-            self._b2z_banner.show("error", msg)
-            self.status.set("Failed", "error")
+            self.banner.show("error", msg)
+            self._b2z_step4.set_state("err")
+            self.app.set_status(t("word.failed"), "error")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    if not TK_AVAILABLE:
-        print(f"{APP_NAME} v{APP_VERSION} · {brand.VENDOR}", file=sys.stderr)
-        print("tkinter is not available in this Python installation.", file=sys.stderr)
-        print("Windows/macOS: reinstall Python and tick 'tcl/tk and IDLE'.", file=sys.stderr)
-        print("Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)
-        return 1
-    ui.enable_dpi_awareness()
-    app = AutoTunerTool()
-    app.geometry(f"{ui.px(980)}x{ui.px(780)}")
-    app.mainloop()
-    return 0
+    """The Backup area of the one app. Kept so the Start menu entry still works."""
+    import dme_app
+    return dme_app.main("backup")
 
 
 if __name__ == "__main__":

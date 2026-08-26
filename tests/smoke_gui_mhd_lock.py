@@ -1,5 +1,5 @@
 """
-Headless GUI smoke test for the MHD Lock Tool.
+Headless GUI smoke test for the Lock and Batch areas of the app.
 
 Needs a display and tkinter; not collected by `unittest discover` on purpose.
 A stub builder stands in for the licensed MHD tool: it prints the same console
@@ -7,7 +7,7 @@ markers the real one prints and writes a .mhd, so the whole chain — resolution
 pre-flight, staging, run, output collection, renaming, logging — is exercised
 for real.
 
-    xvfb-run -a -s "-screen 0 1040x820x24" python tests/smoke_gui_mhd_lock.py
+    xvfb-run -a -s "-screen 0 1120x860x24" python tests/smoke_gui_mhd_lock.py
 """
 import os
 import stat
@@ -24,6 +24,8 @@ os.environ["XDG_CONFIG_HOME"] = os.path.join(WORK, "config")
 
 from _screenshot import shoot  # noqa: E402
 
+import dme_app  # noqa: E402
+import dme_text  # noqa: E402
 import mhd_lock_tool as m  # noqa: E402
 
 assert m.TK_AVAILABLE, "tkinter missing"
@@ -98,11 +100,11 @@ def build_fixture():
     return stub
 
 
-def wait_for_worker(app, timeout=60):
+def wait_for_worker(lock, timeout=60):
     deadline = time.time() + timeout
     while time.time() < deadline:
         app.update()
-        if not (app._worker and app._worker.is_alive()) and app._events.empty():
+        if not (lock._worker and lock._worker.is_alive()) and lock._events.empty():
             app.update()
             return True
         time.sleep(0.05)
@@ -110,21 +112,24 @@ def wait_for_worker(app, timeout=60):
 
 
 stub = build_fixture()
-app = m.MhdLockTool()
-app.geometry("1040x820")
+# Whatever language the app opens in, the assertions ask the word list for the
+# same key it shows, so this test passes in both.
+app = dme_app.DmeApp()
+app.geometry("1120x820")
 app.update()
+lock = app.lock
 
 # ── Settings: the two things you set once ───────────────────────────────────
 app.tabs.select("settings")
 app.update()
-app.var_exe.set(stub)
-app.var_cfg_toolkey.set(os.path.join(CAR, "Gen.toolkey"))
-app.var_cfg_outdir.set(os.path.join(WORK, "locked"))
-app.var_open_after.set(False)
-app.var_timeout.set("60")
-app._save_settings()
+lock.var_exe.set(stub)
+lock.var_cfg_toolkey.set(os.path.join(CAR, "Gen.toolkey"))
+lock.var_cfg_outdir.set(os.path.join(WORK, "locked"))
+lock.var_open_after.set(False)
+lock.var_timeout.set("60")
+lock.save_settings()
 app.update()
-assert app.config_data["builder_exe"] == stub
+assert lock.config_data["builder_exe"] == stub
 assert os.path.isfile(m.config_path()), "settings were not persisted"
 print("settings OK ->", m.config_path())
 shoot("mhd_settings")
@@ -132,49 +137,56 @@ shoot("mhd_settings")
 # ── Lock: ONE file is picked, everything else must resolve itself ───────────
 app.tabs.select("lock")
 app.update()
-app.var_tuned.set(os.path.join(CAR, "MAP1 E45 MAP2 E30 v2.bin"))
-app._resolve_and_check(force=True)
+lock.var_tuned.set(os.path.join(CAR, "MAP1 E45 MAP2 E30 v2.bin"))
+lock._resolve_and_check(force=True)
 app.update()
 
-assert app.var_stock.get().endswith(f"{ROM_ID}_original.bin"), app.var_stock.get()
-assert app.var_xdf.get().endswith(f"{ROM_ID}.xdf"), app.var_xdf.get()
-assert app.var_toolkey.get().endswith("Gen.toolkey"), app.var_toolkey.get()
-assert "ROM 00005C6414C808" in app._step1.hint_var.get(), app._step1.hint_var.get()
+assert lock.var_stock.get().endswith(f"{ROM_ID}_original.bin"), lock.var_stock.get()
+assert lock.var_xdf.get().endswith(f"{ROM_ID}.xdf"), lock.var_xdf.get()
+assert lock.var_toolkey.get().endswith("Gen.toolkey"), lock.var_toolkey.get()
+assert f"ROM {ROM_ID}" in lock.step_file._note.cget("text"), lock.step_file._note.cget("text")
 for key in ("stock", "xdf", "toolkey"):
-    assert app.res_rows[key]._icon.cget("text") == "✓", key
+    assert lock.res_tags[key]._label.cget("text").startswith("\u2713"), key
+assert lock.step_file.state == "done"
 print("auto-resolved  :", ", ".join(
-    f"{k}={os.path.basename(getattr(app, 'var_' + k).get())}" for k in ("stock", "xdf", "toolkey")))
+    f"{k}={os.path.basename(getattr(lock, 'var_' + k).get())}"
+    for k in ("stock", "xdf", "toolkey")))
 
 # nothing typed yet -> the VIN is the only thing still missing
-assert "✕" in app.lbl_vin.cget("text")
-app.var_vin.set("dmetest0000000001")
-app._resolve_and_check(force=True)
+assert "\u2715" in lock.lbl_vin.cget("text")
+assert lock.step_vin.state == "now", lock.step_vin.state
+lock.var_vin.set("dmetest0000000001")
+lock._resolve_and_check(force=True)
 app.update()
-assert "✓" in app.lbl_vin.cget("text")
-log = app.log.text.get("1.0", "end")
+assert "\u2713" in lock.lbl_vin.cget("text")
+assert lock.step_vin.state == "done", lock.step_vin.state
+assert lock.step_run.state == "now", lock.step_run.state
+log = lock.log.text.get("1.0", "end")
 assert "Boost target (Gear x RPM)" in log, log
 assert "Timing (Main) Path 1" in log, log
-print("pre-flight     :", app.var_summary.get())
+print("pre-flight     :", lock.var_summary.get())
 shoot("mhd_lock")
 
 # ── the actual run ──────────────────────────────────────────────────────────
-app._on_lock()
-assert wait_for_worker(app), "worker did not finish"
+lock._on_lock()
+assert wait_for_worker(lock), "worker did not finish"
 produced = sorted(os.listdir(os.path.join(WORK, "locked")))
 assert "MAP1 E45 MAP2 E30 v2.mhd" in produced, produced
 assert "MAP1 E45 MAP2 E30 v2.log" in produced, produced
-run_log = app.log.text.get("1.0", "end")
+run_log = lock.log.text.get("1.0", "end")
 assert "Map correctly written" in run_log
-job_log = open(os.path.join(WORK, "locked", "MAP1 E45 MAP2 E30 v2.log"), encoding="utf-8").read()
+job_log = open(os.path.join(WORK, "locked", "MAP1 E45 MAP2 E30 v2.log"),
+               encoding="utf-8").read()
 assert "DMETEST0000000001" in job_log and "Map correctly written" in job_log
+assert lock.step_run.state == "done", lock.step_run.state
 print("lock run OK    ->", produced)
 assert not [p for p in os.listdir(tempfile.gettempdir()) if p.startswith("dme_mhd_")]
 
-# ── "Prepare folder" must rebuild a hand-built folder ───────────────────────
+# ── "Folder only" must rebuild a hand-built folder ──────────────────────────
 # It has to be reachable without opening anything: the action row, not the log.
-assert app.btn_stage.winfo_ismapped(), "the prepare button is not visible"
-assert app.btn_stage.master is app.lock_page.action_row
-app.btn_stage._invoke()
+assert lock.btn_stage.winfo_ismapped(), "the folder button is not visible"
+assert lock.btn_stage.master is lock.lock_page.action_row
+lock.btn_stage._invoke()
 app.update()
 work_dirs = [p for p in os.listdir(os.path.join(WORK, "locked")) if p.endswith("_work")]
 assert work_dirs, os.listdir(os.path.join(WORK, "locked"))
@@ -182,63 +194,65 @@ staged = sorted(os.listdir(os.path.join(WORK, "locked", work_dirs[0])))
 assert staged == [f"{ROM_ID}.xdf", f"{ROM_ID}_original.bin", "DMETEST0000000001_vin.txt",
                   "Gen.toolkey", "MAP1 E45 MAP2 E30 v2.bin",
                   "TuningMapBuilder-stub.sh"], staged
-print("prepare-only OK->", staged)
+print("folder only OK ->", staged)
 
 # picking another tune must re-resolve without any extra input
-app.var_tuned.set(os.path.join(CAR, "MAP1 E45 MAP2 E30 v4.bin"))
-app._resolve_and_check(force=True)
+lock.var_tuned.set(os.path.join(CAR, "MAP1 E45 MAP2 E30 v4.bin"))
+lock._resolve_and_check(force=True)
 app.update()
-assert app.var_stock.get().endswith(f"{ROM_ID}_original.bin")
-assert app.var_vin.get() == "DMETEST0000000001"     # VIN stays for the same customer
-print("switch tune OK :", app.var_summary.get())
+assert lock.var_stock.get().endswith(f"{ROM_ID}_original.bin")
+assert lock.var_vin.get() == "DMETEST0000000001"     # VIN stays for the same customer
+print("switch tune OK :", lock.var_summary.get())
 
 # ── Batch ───────────────────────────────────────────────────────────────────
 app.tabs.select("batch")
 app.update()
 m.filedialog.askopenfilenames = lambda **k: (os.path.join(CAR, "MAP1 E45 MAP2 E30 v3.bin"),)
-app._batch_add_files()
+lock._batch_add_files()
 app.update()
-assert len(app.batch_jobs) == 1 and app.batch_jobs[0].stock_bin.endswith("_original.bin")
-app._on_batch_run()
-assert wait_for_worker(app, timeout=90), "batch did not finish"
-assert app.batch_table.tree.item("0", "values")[3] == "locked", \
-    app.batch_table.tree.item("0", "values")
-print("batch OK       :", app.var_batch_summary.get())
+assert len(lock.batch_jobs) == 1 and lock.batch_jobs[0].stock_bin.endswith("_original.bin")
+lock._on_batch_run()
+assert wait_for_worker(lock, timeout=90), "batch did not finish"
+assert lock.batch_table.tree.item("0", "values")[3] == dme_text.t("word.locked"), \
+    lock.batch_table.tree.item("0", "values")
+print("batch OK       :", lock.var_batch_summary.get())
 shoot("mhd_batch")
 
 # ── folder mode: no builder needed, and the queue only prepares ─────────────
-app.var_prepare_only.set(True)
-app.var_exe.set("")                      # the whole point: no builder configured
-app._save_settings()
+lock.var_prepare_only.set(True)
+lock.var_exe.set("")                      # the whole point: no builder configured
+lock.save_settings()
 app.update()
-assert not m.missing_setup(app.config_data, app.var_toolkey.get()), \
-    m.missing_setup(app.config_data, app.var_toolkey.get())
+assert not m.missing_setup(lock.config_data, lock.var_toolkey.get()), \
+    m.missing_setup(lock.config_data, lock.var_toolkey.get())
 app.tabs.select("lock")
 app.update()
-assert not app.setup_card.winfo_ismapped(), "folder mode still demands a builder"
+assert not lock.setup_card.winfo_manager(), "folder mode still demands a builder"
 app.tabs.select("batch")
 app.update()
-assert app.btn_batch_run.cget("text").startswith("Prepare folders")
-app._on_batch_run()
-assert wait_for_worker(app, timeout=90), "batch prepare did not finish"
-assert app.batch_table.tree.item("0", "values")[3] == "prepared", \
-    app.batch_table.tree.item("0", "values")
+assert lock.btn_batch_run.cget("text") == dme_text.t("batch.btn.prepare"), \
+    lock.btn_batch_run.cget("text")
+lock._on_batch_run()
+assert wait_for_worker(lock, timeout=90), "batch prepare did not finish"
+assert lock.batch_table.tree.item("0", "values")[3] == dme_text.t("word.prepared"), \
+    lock.batch_table.tree.item("0", "values")
 prepared = [p for p in os.listdir(os.path.join(WORK, "locked")) if p.endswith("_work")]
 assert len(prepared) >= 2, prepared          # the lock-page one plus this batch one
-print("folder mode OK :", app.var_batch_summary.get())
+print("folder mode OK :", lock.var_batch_summary.get())
 
 app.tabs.select("lock")
 app.update()
-assert not app.btn_lock.winfo_ismapped(), "the lock pill survives in folder mode"
-app.var_prepare_only.set(False)
-app._save_settings()
+assert not lock.btn_lock.winfo_manager(), "the lock button survives in folder mode"
+lock.var_prepare_only.set(False)
+lock.save_settings()
 app.update()
-assert app.btn_lock.winfo_ismapped(), "the lock pill does not come back"
+assert lock.btn_lock.winfo_manager(), "the lock button does not come back"
 
 # ── error path ──────────────────────────────────────────────────────────────
-app._on_lock()
+lock._on_lock()
 app.update()
-assert "No MHD map builder" in app.lock_page.banner._text.cget("text")
+assert dme_text.t("setup.what.builder") in lock.lock_page.banner._text.cget("text"), \
+    lock.lock_page.banner._text.cget("text")
 print("missing-builder path OK")
 
 app.destroy()

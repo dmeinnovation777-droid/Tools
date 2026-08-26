@@ -1,10 +1,10 @@
-"""Does every tool actually start out of the built executable?
+"""Does the app actually start out of the built executable, every way in?
 
-The suite is one .exe carrying three programs, reached with --tool <key>.
-Nothing imports the tool modules at module level, so PyInstaller only bundles
-them because of --hidden-import. Miss that flag and the build succeeds, the
-installer succeeds, the launcher opens, and every tool dies on
-ModuleNotFoundError the moment somebody clicks it.
+There is one .exe and one window, reached three ways: plain, --tool mhd and
+--tool autotuner. Nothing imports the area modules at module level, so
+PyInstaller only bundles them because of --hidden-import. Miss that flag and
+the build succeeds, the installer succeeds, the window opens, and it dies on
+ModuleNotFoundError the moment somebody clicks a Start menu entry.
 
 That shipped twice. This runs after the build and refuses to let it happen a
 third time: start each tool for real, and fail on any traceback.
@@ -44,11 +44,12 @@ def _kill_tree(process):
 
 
 def check(exe, key):
-    """Start `exe --tool key`, let it live, then stop it. True when it survived."""
-    handle, log = tempfile.mkstemp(prefix=f"frozen_{key}_", suffix=".log")
+    """Start the app the way `key` names it, let it live, then stop it."""
+    command = [exe] if key is None else [exe, suite.TOOL_FLAG, key]
+    handle, log = tempfile.mkstemp(prefix=f"frozen_{key or 'plain'}_", suffix=".log")
     os.close(handle)
     with open(log, "w", encoding="utf-8", errors="replace") as sink:
-        process = subprocess.Popen([exe, suite.TOOL_FLAG, key],
+        process = subprocess.Popen(command,
                                    stdout=sink, stderr=subprocess.STDOUT,
                                    stdin=subprocess.DEVNULL)
         time.sleep(SETTLE)
@@ -59,11 +60,12 @@ def check(exe, key):
         output = source.read().strip()
     os.unlink(log)
 
+    how = "no flag" if key is None else f"--tool {key}"
     broke = "Traceback" in output or "ModuleNotFoundError" in output
     if alive and not broke:
-        print(f"  ok      --tool {key}", flush=True)
+        print(f"  ok      {how}", flush=True)
         return True
-    print(f"  FAILED  --tool {key}  (still running: {alive})", flush=True)
+    print(f"  FAILED  {how}  (still running: {alive})", flush=True)
     for line in output.splitlines()[-8:]:
         print(f"          {line}", flush=True)
     return False
@@ -78,12 +80,13 @@ def main() -> int:
     if not os.path.isfile(exe):
         print(f"no such executable: {exe}", file=sys.stderr)
         return 2
-    print(f"Starting every tool out of {exe}", flush=True)
-    results = [check(exe, tool["key"]) for tool in suite.TOOLS]
+    print(f"Starting the app every way out of {exe}", flush=True)
+    ways = [None] + [tool["key"] for tool in suite.TOOLS]
+    results = [check(exe, key) for key in ways]
     if all(results):
-        print(f"All {len(results)} tool(s) start.", flush=True)
+        print(f"All {len(results)} way(s) in start.", flush=True)
         return 0
-    print("A tool did not start. The executable is missing its modules: check "
+    print("The app did not start. The executable is missing its modules: check "
           "the --hidden-import flags on the pyinstaller call.", file=sys.stderr)
     return 1
 

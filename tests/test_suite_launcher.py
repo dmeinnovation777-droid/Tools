@@ -14,32 +14,23 @@ import dme_suite as suite      # noqa: E402
 
 
 class TestToolResolution(unittest.TestCase):
-    def test_source_checkout_finds_the_scripts(self):
+    def test_every_tool_names_a_real_script_in_the_checkout(self):
         for tool in suite.TOOLS:
-            command = suite.resolve_tool(tool, frozen=False, base=ROOT)
-            self.assertIsNotNone(command, tool["name"])
-            self.assertTrue(command[-1].endswith(tool["script"]))
-            self.assertTrue(os.path.isfile(command[-1]))
+            self.assertTrue(os.path.isfile(os.path.join(ROOT, tool["script"])),
+                            tool["name"])
 
-    def test_installed_build_starts_itself_with_the_tool_key(self):
-        """One executable carries all three programs: Python and tkinter are
-        packed once, not three times."""
+    def test_every_tool_opens_a_real_area_of_the_app(self):
+        """Three Start menu entries, one window: the key picks the page."""
+        import dme_app
         for tool in suite.TOOLS:
-            command = suite.resolve_tool(tool, frozen=True, base="/anywhere")
-            self.assertEqual(command, [sys.executable, "--tool", tool["key"]])
-
-    def test_a_missing_script_returns_none_from_source(self):
-        with tempfile.TemporaryDirectory() as folder:
-            for tool in suite.TOOLS:
-                self.assertIsNone(suite.resolve_tool(tool, frozen=False, base=folder))
+            self.assertIn(tool["page"], dme_app.AREAS, tool["name"])
 
     def test_every_tool_is_fully_described(self):
         for tool in suite.TOOLS:
-            for key in ("key", "name", "module", "script", "pitch", "bullets"):
+            for key in ("key", "name", "module", "script", "page"):
                 self.assertIn(key, tool)
             self.assertTrue(tool["script"].endswith(".py"))
             self.assertEqual(tool["script"], tool["module"] + ".py")
-            self.assertTrue(tool["bullets"])
 
     def test_tool_keys_are_unique_and_argument_safe(self):
         keys = [t["key"] for t in suite.TOOLS]
@@ -103,9 +94,11 @@ class TestBuildFilesStayInSync(unittest.TestCase):
             where = "/".join(parts)
             self.assertIn(f'--name "{brand.SUITE}"', script, where)
             self.assertIn("dme_suite.py", script, where)
-            for tool in suite.TOOLS:
-                self.assertIn(f'--hidden-import {tool["module"]}', script,
-                              f"{where} does not bundle {tool['module']}")
+            # dme_app is imported inside main(), the areas inside dme_app, so
+            # PyInstaller sees none of them without being told.
+            for module in ["dme_app"] + [tool["module"] for tool in suite.TOOLS]:
+                self.assertIn(f'--hidden-import {module}', script,
+                              f"{where} does not bundle {module}")
 
     def test_no_build_still_makes_a_separate_exe_per_tool(self):
         """Leftovers would be shipped by neither installer nor launcher."""

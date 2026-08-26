@@ -89,7 +89,8 @@ class ContrastCase(unittest.TestCase):
     def setUp(self):
         self.p = _palette()
         self.grounds = {name: self.p[name] for name in
-                        ("BG", "SURFACE", "CARD", "CARD_ALT", "HOVER", "FIELD")}
+                        ("BG", "SURFACE", "CARD", "CARD_ALT", "HOVER", "FIELD",
+                         "HAIRLINE")}
 
     def assertReadable(self, ink, ground, minimum=AA, label=""):
         got = contrast(ink, ground)

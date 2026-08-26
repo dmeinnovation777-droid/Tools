@@ -5,18 +5,25 @@
 
 <h1 align="center">DME Innovation Tools</h1>
 
-<p align="center">Zwei Windows-Werkzeuge für die Arbeit am Steuergerät — in einer Installation.</p>
+<p align="center">Eine Windows-App für die Arbeit am Steuergerät. Ein Fenster, vier Bereiche, Deutsch oder Englisch.</p>
 
 <p align="center">
   <a href="https://github.com/dmeinnovation777-droid/Tools/releases/latest"><b>⬇ Setup herunterladen</b></a>
 </p>
 
-![DME Innovation Tools](docs/screenshot-suite-launcher.png)
+![DME Innovation Tools](docs/screenshot-lock.png)
 
-| Tool | Zweck |
+| Bereich | Zweck |
 | --- | --- |
-| **AutoTuner Backup Tool** | AutoTuner-Backups (`.zip`/`.bak`) zu einer durchgehenden `.bin` zusammenführen und wieder zurück verpacken |
-| **MHD Lock Tool** | Locken von MHD+ Tune-Files: getunte Datei wählen, fertig — Stock-ROM, XDF, Tool-Key und VIN findet die App selbst |
+| **Locken** | MHD+ Tune-Files locken: getunte Datei wählen, fertig. Stock-ROM, XDF, Tool-Key und VIN findet die App selbst |
+| **Stapel** | Derselbe Ablauf für einen ganzen Ordner, jeder Auftrag in seinem eigenen sauberen Arbeitsordner |
+| **Backup** | AutoTuner-Backups (`.zip`/`.bak`) zu einer durchgehenden `.bin` zusammenführen und wieder zurück verpacken |
+| **Einstellungen** | Builder, Tool-Key, Zielordner und die Sprache. Einmal gesetzt, danach fragt die App nicht mehr |
+
+Jeder Bereich hat dieselbe Form: eine senkrechte Kette von Schritten. Was
+erledigt ist, bleibt stehen; der laufende Schritt trägt als einziger Amber;
+Protokoll, Fehler und Ergebnis erscheinen in dem Schritt, zu dem sie gehören.
+Es öffnet sich kein zweites Fenster.
 
 Beide laufen mit der Python-Standardbibliothek (nur `tkinter` für die
 Oberfläche) — keine Fremdpakete zur Laufzeit. Die Darstellung ist
@@ -29,8 +36,8 @@ Größen bereit.
 ## Inhalt
 
 - [Installation](#installation)
-- [AutoTuner Backup Tool](#autotuner-backup-tool)
-- [MHD Lock Tool](#mhd-lock-tool)
+- [Backup](#backup)
+- [Locken](#locken)
 - [Selbst bauen](#selbst-bauen)
 - [Projektstruktur](#projektstruktur)
 - [Branding anpassen](#branding-anpassen)
@@ -46,13 +53,13 @@ Größen bereit.
 unter *Assets*:
 
 ```
-DME-Innovation-Tools-Setup-2.3.4.exe
+DME-Innovation-Tools-Setup-3.0.0.exe
 ```
 
 Windows zeigt bei unsignierten Setups „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
 
-Das Setup installiert beide Werkzeuge samt Starter, legt Startmenü- und
+Das Setup installiert die App, legt Startmenü- und
 (optional) Desktop-Verknüpfungen an und bringt einen Uninstaller mit.
 Standardmäßig wird nur für den aktuellen Benutzer installiert — dann fragt
 Windows nicht nach Administratorrechten; im Assistenten lässt sich auch „für
@@ -61,14 +68,13 @@ alle Benutzer" wählen. Deutsch und Englisch stehen zur Auswahl.
 Installiert wird **eine** Programmdatei:
 
 ```
-DME Innovation Tools.exe      Starter und beide Werkzeuge in einem
+DME Innovation Tools.exe      die ganze App
 ```
 
-Sie trägt alle drei Programme. Im Startmenü stehen trotzdem drei Einträge — die
-beiden Werkzeuge starten dieselbe Datei mit einem Schalter
-(`--tool autotuner`, `--tool mhd`). Vorher lag jedes Werkzeug als eigene `.exe`
-vor und brachte seine eigene Kopie von Python und tkinter mit; jetzt ist die
-Laufzeit einmal drin. Das Setup ist dadurch rund ein Drittel so groß.
+Im Startmenü stehen drei Einträge, weil es drei Wege hinein gibt: der Eintrag
+der App öffnet auf **Locken**, *MHD Lock Tool* ebenfalls auf Locken und
+*AutoTuner Backup Tool* auf **Backup**. Alle drei starten dieselbe Datei, die
+beiden Namen mit einem Schalter (`--tool mhd`, `--tool autotuner`).
 
 Jeder Git-Tag `v*` baut das Setup automatisch und veröffentlicht es als Release.
 Ohne Tag hängt der Actions-Lauf es als Artefakt an. Lokal geht es mit
@@ -78,18 +84,19 @@ Ohne Tag hängt der Actions-Lauf es als Artefakt an. Lokal geht es mit
 
 ```bat
 :: Python 3.10 oder neuer, bei der Installation "tcl/tk and IDLE" anhaken
-python dme_suite.py          :: Starter
-python autotuner_tool.py     :: oder direkt ein Werkzeug
-python mhd_lock_tool.py
+python dme_suite.py          :: die App, öffnet auf Locken
+python dme_app.py            :: dasselbe, ohne den Umweg
+python autotuner_tool.py     :: öffnet auf Backup
+python mhd_lock_tool.py      :: öffnet auf Locken
 ```
 
 Auf Linux zusätzlich `sudo apt install python3-tk`.
 
 ---
 
-## AutoTuner Backup Tool
+## Backup
 
-![AutoTuner Backup Tool — ZIP zu BIN](docs/screenshot-autotuner-zip-to-bin.png)
+![AutoTuner Backup Tool — ZIP zu BIN](docs/screenshot-backup-zip-to-bin.png)
 
 ### ZIP → BIN
 
@@ -103,7 +110,7 @@ Auf Linux zusätzlich `sudo apt install python3-tk`.
 
 ### BIN → ZIP
 
-![AutoTuner Backup Tool — BIN zu ZIP](docs/screenshot-autotuner-bin-to-zip.png)
+![AutoTuner Backup Tool — BIN zu ZIP](docs/screenshot-backup-bin-to-zip.png)
 
 1. Geänderte `.bin` auswählen. Passt die Dateigröße zu einem bekannten Layout,
    wird das Preset automatisch gesetzt.
@@ -148,9 +155,9 @@ Zug.
 
 ---
 
-## MHD Lock Tool
+## Locken
 
-![MHD Lock Tool](docs/screenshot-mhd-lock-lock.png)
+![MHD Lock Tool](docs/screenshot-lock.png)
 
 ### Was es macht — und was nicht
 
@@ -299,7 +306,7 @@ Zweck der Übung.
 
 ### Batch
 
-![MHD Lock Tool — Batch](docs/screenshot-mhd-lock-batch.png)
+![MHD Lock Tool — Batch](docs/screenshot-batch.png)
 
 Mehrere Kunden in einem Durchgang. Jeder Job bekommt sein eigenes
 Arbeitsverzeichnis — eine kaputte Datei kann keinen anderen Kunden beeinflussen.
@@ -322,7 +329,7 @@ Arbeitsverzeichnis — eine kaputte Datei kann keinen anderen Kunden beeinflusse
 
 ### Einstellungen
 
-![MHD Lock Tool — Settings](docs/screenshot-mhd-lock-settings.png)
+![MHD Lock Tool — Settings](docs/screenshot-settings.png)
 
 | Einstellung | Bedeutung |
 | --- | --- |
@@ -368,7 +375,7 @@ build_exe.bat           :: nur die drei .exe, ohne Setup
 (`winget install JRSoftware.InnoSetup`). Ergebnis:
 
 ```
-dist\DME-Innovation-Tools-Setup-2.3.4.exe
+dist\DME-Innovation-Tools-Setup-3.0.0.exe
 dist\DME Innovation Tools.exe
 ```
 
@@ -382,13 +389,15 @@ Programme, Setup und Dateiname ziehen mit.
 ## Projektstruktur
 
 ```
-dme_suite.py             Starter — listet die Werkzeuge und startet sie
-autotuner_tool.py        AutoTuner Backup Tool (Logik + GUI)
-mhd_lock_tool.py         MHD Lock Tool (Logik + GUI)
-dme_ui.py                gemeinsames Design-System (Cards, Tabs, Banner, Tabellen …)
+dme_suite.py             Einstieg — liest --tool und öffnet die App auf dem Bereich
+dme_app.py               das eine Fenster: Shell, Einstellungen, Sprache
+autotuner_tool.py        Backup: Motor + BackupUI (Bereich Backup)
+mhd_lock_tool.py         Locken: Motor + LockUI (Bereiche Locken und Stapel)
+dme_ui.py                gemeinsames Design-System (Flow, Steps, Banner, Tabellen …)
+dme_text.py              die Wortliste, Deutsch und Englisch nebeneinander
 dme_brand.py             Produktname, Version, eingebettetes DME-Logo, Fenster-Icon
 installer/               Inno-Setup-Skript für das Windows-Setup
-build_exe.bat            PyInstaller-Build der drei Programme
+build_exe.bat            PyInstaller-Build der einen Programmdatei
 build_installer.bat      Build inklusive Setup-Datei
 tools/generate_assets.py erzeugt alle Logo-Assets aus dem Vektor-Master
 tools/xwd2png.py         Screenshot-Helfer für die headless GUI-Tests
@@ -454,20 +463,24 @@ Dazu zwei Regeln, an die sich beide Programme halten:
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v        # 182 Tests, keine Anzeige nötig
+python -m unittest discover -s tests -v        # 195 Tests, keine Anzeige nötig
 
 # GUI-Tests (brauchen tkinter und eine Anzeige)
-xvfb-run -a -s "-screen 0  880x560x24" python tests/smoke_gui_suite.py
-xvfb-run -a -s "-screen 0 1000x800x24" python tests/smoke_gui_autotuner.py
-xvfb-run -a -s "-screen 0 1040x820x24" python tests/smoke_gui_mhd_lock.py
-xvfb-run -a -s "-screen 0 1100x880x24" python tests/smoke_gui_layout.py
+xvfb-run -a -s "-screen 0 1120x860x24" python tests/smoke_gui_suite.py
+xvfb-run -a -s "-screen 0 1120x860x24" python tests/smoke_gui_autotuner.py
+xvfb-run -a -s "-screen 0 1120x860x24" python tests/smoke_gui_mhd_lock.py
+xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_layout.py
+xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_language.py
 ```
 
 Der GUI-Test des Lock Tools ersetzt den lizenzierten Builder durch ein Stub-
 Skript, das dieselben Konsolenmeldungen ausgibt — damit läuft die komplette
 Kette (Prüfung → Staging → Lauf → Ablage) auch ohne MHD-Software durch.
-Weitere Tests halten Starter, Build-Skript und Installer synchron: ein
-umbenanntes Werkzeug fällt sofort auf, statt erst im Setup.
+Weitere Tests halten Einstieg, Build-Skript und Installer synchron: ein
+umbenannter Bereich fällt sofort auf, statt erst im Setup. `smoke_gui_layout.py`
+misst, dass beim Bereichswechsel keine Zeile verrutscht, in beiden Sprachen;
+`smoke_gui_language.py` schaltet die Sprache um und prüft, dass Dateien, VIN,
+Warteschlange und Einstellungen den Neuaufbau überleben.
 
 ---
 

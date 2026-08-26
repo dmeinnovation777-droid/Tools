@@ -33,14 +33,16 @@ jobs:
           python-version: "3.12"
       - name: Install tkinter and a virtual display
         run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
-      - name: AutoTuner Backup Tool
-        run: xvfb-run -a -s "-screen 0 1000x800x24" python tests/smoke_gui_autotuner.py
-      - name: MHD Lock Tool
-        run: xvfb-run -a -s "-screen 0 1040x820x24" python tests/smoke_gui_mhd_lock.py
-      - name: Suite launcher
-        run: xvfb-run -a -s "-screen 0 880x560x24" python tests/smoke_gui_suite.py
-      - name: The pages stand still when you switch pages
-        run: xvfb-run -a -s "-screen 0 1100x880x24" python tests/smoke_gui_layout.py
+      - name: Backup, both directions
+        run: xvfb-run -a -s "-screen 0 1120x860x24" python tests/smoke_gui_autotuner.py
+      - name: Lock and Batch, against a stub builder
+        run: xvfb-run -a -s "-screen 0 1120x860x24" python tests/smoke_gui_mhd_lock.py
+      - name: All three ways into the app
+        run: xvfb-run -a -s "-screen 0 1120x860x24" python tests/smoke_gui_suite.py
+      - name: The pages stand still when you switch areas
+        run: xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_layout.py
+      - name: The language switch loses nothing
+        run: xvfb-run -a -s "-screen 0 1120x880x24" python tests/smoke_gui_language.py
 
   build-windows:
     name: Build Windows installer
@@ -64,7 +66,7 @@ jobs:
         run: >
           pyinstaller --onefile --windowed --noconfirm --clean
           --name "DME Innovation Tools" --icon assets/dme-icon.ico
-          --hidden-import autotuner_tool --hidden-import mhd_lock_tool
+          --hidden-import dme_app --hidden-import autotuner_tool --hidden-import mhd_lock_tool
           dme_suite.py
       - name: Prove every tool starts out of the built executable
         shell: bash

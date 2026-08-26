@@ -7,13 +7,13 @@
 ;  Expects one PyInstaller build in ..\dist:
 ;      DME Innovation Tools.exe
 ;
-;  It carries all three programs. The Start Menu entries for the two tools
-;  point at the same file with a --tool argument, which is why Python and
-;  tkinter ship once instead of three times.
+;  It is one program with one window. The Start Menu keeps three entries
+;  because there are three ways in: the app itself opens on Lock, and the two
+;  tool names open the same window on Lock and on Backup.
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "2.3.4"
+  #define AppVersion "3.0.0"
 #endif
 
 #define AppName      "DME Innovation Tools"
@@ -75,8 +75,8 @@ english.ToolsGroup=Tools
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [InstallDelete]
-; Up to 2.1.1 each tool was its own executable. They are inside the launcher
-; now, so the leftovers must go - Inno does not remove files it no longer ships.
+; Up to 2.1.1 each tool was its own executable. They are inside the one
+; program now, so the leftovers must go: Inno removes only what it ships.
 Type: files; Name: "{app}\AutoTuner Backup Tool.exe"
 Type: files; Name: "{app}\MHD Lock Tool.exe"
 

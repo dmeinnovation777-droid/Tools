@@ -1,6 +1,6 @@
 # Entwicklungsnotizen
 
-Hintergrundwissen zu den beiden Tools: woher die Annahmen stammen, was
+Hintergrundwissen zur App: woher die Annahmen stammen, was
 gegengeprüft wurde und wie die Entwicklungsumgebung aufgesetzt ist.
 Bedienung und Aufbau stehen im [README](README.md).
 
@@ -11,18 +11,20 @@ Bedienung und Aufbau stehen im [README](README.md).
 | Teil | Status |
 | --- | --- |
 | Branding-Pipeline aus dem Vektor-Logo | fertig |
-| Gemeinsames Design-System `dme_ui.py` | fertig, heller Look mit Schaltern |
-| AutoTuner Backup Tool | fertig, 36 Unit-Tests + GUI-Smoke-Test |
-| MHD Lock Tool | fertig, 99 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
-| Starter `dme_suite.py` | fertig, 17 Unit-Tests + GUI-Smoke-Test |
+| Gemeinsames Design-System `dme_ui.py` | fertig, Ein Fluss: TopNav, Flow, Steps |
+| Fenster `dme_app.py` | fertig, vier Bereiche, GUI-Smoke-Tests |
+| Wortliste `dme_text.py` | fertig, Deutsch und Englisch, 13 Unit-Tests |
+| Backup (`autotuner_tool.py`) | fertig, Unit-Tests + GUI-Smoke-Test |
+| Locken und Stapel (`mhd_lock_tool.py`) | fertig, Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
+| Einstieg `dme_suite.py` | fertig, Unit-Tests + GUI-Smoke-Test |
 | Windows-Setup (Inno Setup) + CI-Build | fertig |
 | README, Build-Skripte | fertig |
 
-`python -m unittest discover -s tests` → 182 Tests, grün.
+`python -m unittest discover -s tests` → 195 Tests, grün.
 
 Produktname und Version stehen zentral in `dme_brand.py`
-(`SUITE = "DME Innovation Tools"`, `VERSION = "2.3.4"`); beide Werkzeuge, das
-Setup und der Dateiname der Setup-Datei ziehen daraus.
+(`SUITE = "DME Innovation Tools"`, `VERSION = "3.0.0"`); die App, das Setup und
+der Dateiname der Setup-Datei ziehen daraus.
 
 ---
 
@@ -304,7 +306,7 @@ Eine Installationsdatei für den PC:
 `dist\DME-Innovation-Tools-Setup-<version>.exe`, gebaut aus
 `installer/dme-innovation-tools.iss` (Inno Setup 6).
 
-* Installiert Starter plus beide Werkzeuge, Startmenü-Gruppe, optionale
+* Installiert die eine Programmdatei, Startmenü-Gruppe, optionale
   Desktop-Verknüpfung, Uninstaller; Deutsch und Englisch.
 * `PrivilegesRequired=lowest` mit `PrivilegesRequiredOverridesAllowed=dialog`:
   standardmäßig Installation je Benutzer ohne UAC-Abfrage, „für alle Benutzer"
@@ -314,10 +316,9 @@ Eine Installationsdatei für den PC:
 * Die Einstellungsdatei unter `%APPDATA%\DME Innovation` bleibt bei einer
   Deinstallation erhalten (Builder-Pfad).
 * Das `.iss` ist bewusst reines ASCII — Inno Setup verlangt sonst eine BOM.
-* Der Starter findet die Werkzeuge relativ zu sich selbst: im Build neben der
-  `.exe`, aus den Quellen neben dem Skript (`resolve_tool`). Unter Windows wird
-  aus den Quellen `pythonw.exe` bevorzugt, damit kein Konsolenfenster aufblitzt.
-* Ein Test hält Starter, `build_exe.bat` und `.iss` synchron: ein umbenanntes
+* Drei Startmenü-Einträge, eine Programmdatei: `--tool mhd` öffnet auf Locken,
+  `--tool autotuner` auf Backup, ohne Schalter auf Locken.
+* Ein Test hält Einstieg, `build_exe.bat` und `.iss` synchron: ein umbenanntes
   Werkzeug fällt sofort auf, statt erst beim Setup.
 
 ---
