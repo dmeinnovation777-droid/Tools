@@ -21,27 +21,65 @@ class TestToolResolution(unittest.TestCase):
             self.assertTrue(command[-1].endswith(tool["script"]))
             self.assertTrue(os.path.isfile(command[-1]))
 
-    def test_installed_build_starts_the_sibling_exe(self):
-        with tempfile.TemporaryDirectory() as folder:
-            for tool in suite.TOOLS:
-                open(os.path.join(folder, tool["exe"]), "wb").close()
-            for tool in suite.TOOLS:
-                command = suite.resolve_tool(tool, frozen=True, base=folder)
-                self.assertEqual(command, [os.path.join(folder, tool["exe"])])
+    def test_installed_build_starts_itself_with_the_tool_key(self):
+        """One executable carries all three programs: Python and tkinter are
+        packed once, not three times."""
+        for tool in suite.TOOLS:
+            command = suite.resolve_tool(tool, frozen=True, base="/anywhere")
+            self.assertEqual(command, [sys.executable, "--tool", tool["key"]])
 
-    def test_missing_tool_returns_none(self):
+    def test_a_missing_script_returns_none_from_source(self):
         with tempfile.TemporaryDirectory() as folder:
             for tool in suite.TOOLS:
-                self.assertIsNone(suite.resolve_tool(tool, frozen=True, base=folder))
                 self.assertIsNone(suite.resolve_tool(tool, frozen=False, base=folder))
 
     def test_every_tool_is_fully_described(self):
         for tool in suite.TOOLS:
-            for key in ("name", "exe", "script", "pitch", "bullets"):
+            for key in ("key", "name", "module", "script", "pitch", "bullets"):
                 self.assertIn(key, tool)
-            self.assertTrue(tool["exe"].endswith(".exe"))
             self.assertTrue(tool["script"].endswith(".py"))
+            self.assertEqual(tool["script"], tool["module"] + ".py")
             self.assertTrue(tool["bullets"])
+
+    def test_tool_keys_are_unique_and_argument_safe(self):
+        keys = [t["key"] for t in suite.TOOLS]
+        self.assertEqual(len(set(keys)), len(keys))
+        for key in keys:
+            self.assertRegex(key, r"^[a-z][a-z0-9-]*$")
+
+    def test_an_unknown_key_is_refused_not_guessed(self):
+        self.assertIsNone(suite.tool_by_key("nope"))
+        self.assertEqual(suite.run_tool("nope"), 2)
+        self.assertEqual(suite.main(["--tool"]), 2)
+
+    def test_every_key_reaches_a_real_module(self):
+        import importlib
+        for tool in suite.TOOLS:
+            module = importlib.import_module(tool["module"])
+            self.assertTrue(callable(module.main), tool["module"])
+
+    def test_the_flag_hands_over_to_that_tool_and_returns_its_code(self):
+        """The whole one-executable idea rests on this one hop."""
+        import importlib
+        for tool in suite.TOOLS:
+            module = importlib.import_module(tool["module"])
+            original, called = module.main, []
+            module.main = lambda: (called.append(tool["key"]), 7)[1]
+            try:
+                self.assertEqual(suite.main(["--tool", tool["key"]]), 7)
+            finally:
+                module.main = original
+            self.assertEqual(called, [tool["key"]])
+
+    def test_the_flag_may_sit_anywhere_on_the_command_line(self):
+        import importlib
+        module = importlib.import_module(suite.TOOLS[0]["module"])
+        original = module.main
+        module.main = lambda: 0
+        try:
+            self.assertEqual(suite.main(["-x", "--tool", suite.TOOLS[0]["key"]]), 0)
+        finally:
+            module.main = original
 
 
 class TestBuildFilesStayInSync(unittest.TestCase):
@@ -51,19 +89,29 @@ class TestBuildFilesStayInSync(unittest.TestCase):
         with open(os.path.join(ROOT, *parts), encoding="utf-8") as handle:
             return handle.read()
 
-    def test_build_script_builds_every_tool_and_the_launcher(self):
+    def test_build_script_bundles_every_tool_into_the_one_executable(self):
+        """A tool PyInstaller never sees is a tool the .exe cannot open - and
+        nothing imports them at module level, so each needs a hidden import."""
         script = self.read("build_exe.bat")
-        for tool in suite.TOOLS:
-            self.assertIn(f'--name "{os.path.splitext(tool["exe"])[0]}"', script)
-            self.assertIn(tool["script"], script)
         self.assertIn(f'--name "{brand.SUITE}"', script)
         self.assertIn("dme_suite.py", script)
-
-    def test_installer_ships_every_tool(self):
-        iss = self.read("installer", "dme-innovation-tools.iss")
         for tool in suite.TOOLS:
-            self.assertIn(tool["exe"], iss)
+            self.assertIn(f'--hidden-import {tool["module"]}', script)
+
+    def test_installer_ships_the_one_executable_and_a_shortcut_per_tool(self):
+        iss = self.read("installer", "dme-innovation-tools.iss")
         self.assertIn(f"{brand.SUITE}.exe", iss)
+        for tool in suite.TOOLS:
+            self.assertIn(tool["name"], iss)
+            self.assertIn(f'Parameters: "--tool {tool["key"]}"', iss)
+
+    def test_installer_clears_the_executables_it_replaced(self):
+        """Up to 2.1.1 each tool was its own .exe. Inno removes only what it
+        ships, so an upgrade would leave two stale programs behind."""
+        iss = self.read("installer", "dme-innovation-tools.iss")
+        self.assertIn("[InstallDelete]", iss)
+        for stale in ("AutoTuner Backup Tool.exe", "MHD Lock Tool.exe"):
+            self.assertIn(f'Type: files; Name: "{{app}}\\{stale}"', iss)
 
     def test_installer_default_version_matches_the_suite(self):
         iss = self.read("installer", "dme-innovation-tools.iss")

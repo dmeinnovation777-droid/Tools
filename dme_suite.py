@@ -3,8 +3,11 @@ DME Innovation Tools — suite launcher
 =====================================
 
 The single entry point installed on the PC: it lists the tools of the suite and
-starts the one you pick. Works both from source (starts the .py next to it) and
-from the installed build (starts the .exe next to it).
+starts the one you pick.
+
+From source it starts the .py next to it. The installed build is ONE executable
+that carries all three programs: it starts itself again with --tool <key>, so
+Python and tkinter are packed once instead of three times.
 
 © DME Innovation
 """
@@ -28,11 +31,12 @@ APP_NAME = brand.SUITE
 APP_VERSION = brand.VERSION
 APP_TAGLINE = "ECU tooling for the workshop"
 
-# name, executable (installed build), script (source checkout), pitch, bullets
+# key (--tool argument and module), name, script (source checkout), pitch, bullets
 TOOLS = [
     {
+        "key": "autotuner",
         "name": "AutoTuner Backup Tool",
-        "exe": "AutoTuner Backup Tool.exe",
+        "module": "autotuner_tool",
         "script": "autotuner_tool.py",
         "pitch": "Turn AutoTuner ECU backups into one continuous binary — and back.",
         "bullets": [
@@ -42,8 +46,9 @@ TOOLS = [
         ],
     },
     {
+        "key": "mhd",
         "name": "MHD Lock Tool",
-        "exe": "MHD Lock Tool.exe",
+        "module": "mhd_lock_tool",
         "script": "mhd_lock_tool.py",
         "pitch": "Lock MHD+ tune files without the folder juggling.",
         "bullets": [
@@ -59,8 +64,11 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+TOOL_FLAG = "--tool"
+
+
 def base_dir() -> str:
-    """Where sibling tools live: next to the .exe, or next to this script."""
+    """Where the tools live: next to the .exe, or next to this script."""
     if is_frozen():
         return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
@@ -79,17 +87,35 @@ def resolve_tool(tool: dict, frozen: bool = None, base: str = None) -> list | No
     frozen = is_frozen() if frozen is None else frozen
     base = base_dir() if base is None else base
     if frozen:
-        target = os.path.join(base, tool["exe"])
-        return [target] if os.path.isfile(target) else None
+        # One executable, three programs. Starting it again with the key runs
+        # that tool in its own process, so a crash cannot take the others down.
+        return [sys.executable, TOOL_FLAG, tool["key"]]
     target = os.path.join(base, tool["script"])
     return [python_runner(), target] if os.path.isfile(target) else None
 
 
 def launch(command: list) -> None:
-    kwargs = {"cwd": os.path.dirname(command[-1]) or None}
+    kwargs = {"cwd": base_dir()}
     if os.name == "nt":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     subprocess.Popen(command, **kwargs)
+
+
+def tool_by_key(key: str) -> dict | None:
+    return next((t for t in TOOLS if t["key"] == key), None)
+
+
+def run_tool(key: str) -> int:
+    """Hand over to one of the bundled programs."""
+    tool = tool_by_key(key)
+    if tool is None:
+        known = ", ".join(t["key"] for t in TOOLS)
+        print(f"Unknown tool '{key}'. Known: {known}", file=sys.stderr)
+        return 2
+    # Imported here, not at module level: the launcher must still start when a
+    # tool fails to import, and from source only the picked one is loaded.
+    import importlib
+    return importlib.import_module(tool["module"]).main()
 
 
 _TkBase = tk.Tk if TK_AVAILABLE else object
@@ -176,7 +202,14 @@ class SuiteLauncher(_TkBase):
         self.status.set(f"Started {tool['name']}", "ok")
 
 
-def main() -> int:
+def main(argv: list = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if TOOL_FLAG in argv:
+        index = argv.index(TOOL_FLAG)
+        if index + 1 < len(argv):
+            return run_tool(argv[index + 1])
+        print(f"{TOOL_FLAG} needs a tool key", file=sys.stderr)
+        return 2
     if not TK_AVAILABLE:
         print(f"{APP_NAME} v{APP_VERSION}", file=sys.stderr)
         print("tkinter is not available in this Python installation.", file=sys.stderr)

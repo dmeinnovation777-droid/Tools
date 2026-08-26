@@ -4,22 +4,24 @@
 ;  Build:  build_installer.bat        (from the repository root)
 ;  or:     ISCC.exe /DAppVersion=1.0.0 installer\dme-innovation-tools.iss
 ;
-;  Expects the three PyInstaller builds in ..\dist:
-;      DME Innovation Tools.exe   (launcher)
-;      AutoTuner Backup Tool.exe
-;      MHD Lock Tool.exe
+;  Expects one PyInstaller build in ..\dist:
+;      DME Innovation Tools.exe
+;
+;  It carries all three programs. The Start Menu entries for the two tools
+;  point at the same file with a --tool argument, which is why Python and
+;  tkinter ship once instead of three times.
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "2.1.1"
+  #define AppVersion "2.2.0"
 #endif
 
 #define AppName      "DME Innovation Tools"
 #define AppPublisher "DME Innovation"
 #define AppURL       "https://github.com/dmeinnovation777-droid/Tools"
 #define LauncherExe  "DME Innovation Tools.exe"
-#define AutoTunerExe "AutoTuner Backup Tool.exe"
-#define MhdLockExe   "MHD Lock Tool.exe"
+#define AutoTunerName "AutoTuner Backup Tool"
+#define MhdLockName   "MHD Lock Tool"
 #define SourceDir    "..\dist"
 
 [Setup]
@@ -72,16 +74,22 @@ english.ToolsGroup=Tools
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
+[InstallDelete]
+; Up to 2.1.1 each tool was its own executable. They are inside the launcher
+; now, so the leftovers must go - Inno does not remove files it no longer ships.
+Type: files; Name: "{app}\AutoTuner Backup Tool.exe"
+Type: files; Name: "{app}\MHD Lock Tool.exe"
+
 [Files]
 Source: "{#SourceDir}\{#LauncherExe}";  DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceDir}\{#AutoTunerExe}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceDir}\{#MhdLockExe}";   DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md";                 DestDir: "{app}"; DestName: "README.md"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}";      Filename: "{app}\{#LauncherExe}"
-Name: "{group}\{#AutoTunerExe}"; Filename: "{app}\{#AutoTunerExe}"
-Name: "{group}\{#MhdLockExe}";   Filename: "{app}\{#MhdLockExe}"
+Name: "{group}\{#AppName}"; Filename: "{app}\{#LauncherExe}"
+Name: "{group}\{#AutoTunerName}"; Filename: "{app}\{#LauncherExe}"; \
+    Parameters: "--tool autotuner"
+Name: "{group}\{#MhdLockName}"; Filename: "{app}\{#LauncherExe}"; \
+    Parameters: "--tool mhd"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#LauncherExe}"; Tasks: desktopicon
 

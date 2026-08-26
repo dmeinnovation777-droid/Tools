@@ -80,14 +80,11 @@ jobs:
           name: DME-Innovation-Tools-Setup-${{ steps.version.outputs.value }}
           path: dist/DME-Innovation-Tools-Setup-*.exe
           if-no-files-found: error
-      - name: Upload the plain executables
+      - name: Upload the plain executable
         uses: actions/upload-artifact@v4
         with:
           name: dme-tools-windows-exe
-          path: |
-            dist/DME Innovation Tools.exe
-            dist/AutoTuner Backup Tool.exe
-            dist/MHD Lock Tool.exe
+          path: dist/DME Innovation Tools.exe
           if-no-files-found: error
 
       # Publishes the installer as a permanent, login-free download.

@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-2.1.1.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-2.2.0.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -18,6 +18,23 @@ Dazu Startmenü-Einträge, auf Wunsch eine Desktop-Verknüpfung und ein Uninstal
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Neu in 2.2.0
+
+**Das Setup ist rund ein Drittel so groß.** Bisher war jedes Werkzeug eine
+eigene Programmdatei — und jede brachte ihre eigene Kopie von Python und der
+Oberflächenbibliothek mit, dreimal dasselbe. Jetzt ist es **eine** Datei, die
+alle drei Programme trägt.
+
+Für Dich ändert sich an der Bedienung nichts: im Startmenü stehen weiter drei
+Einträge, die beiden Werkzeuge starten dieselbe Datei mit einem Schalter. Sie
+laufen weiterhin in getrennten Prozessen — stürzt eines ab, bleibt das andere
+stehen. Deine Einstellungen bleiben unberührt.
+
+Beim Aktualisieren räumt das Setup die beiden alten Programmdateien weg.
+Solltest Du Dir früher eine eigene Verknüpfung direkt auf
+`AutoTuner Backup Tool.exe` oder `MHD Lock Tool.exe` gelegt haben, zeigt die
+danach ins Leere — nimm die Einträge aus dem Startmenü.
 
 ## Korrekturen in 2.1.1
 

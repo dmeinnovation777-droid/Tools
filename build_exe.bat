@@ -32,30 +32,20 @@ if not exist "assets\dme-icon.ico" (
 )
 
 echo.
-echo [1/3] Building the launcher...
+echo Building one executable that carries all three programs...
+echo   (Python and tkinter go in once, not three times - the launcher starts
+echo    itself again with --tool ^<key^> to open a tool.)
 pyinstaller --onefile --windowed --noconfirm --clean ^
-    --name "DME Innovation Tools" --icon "assets\dme-icon.ico" dme_suite.py
-if errorlevel 1 goto :failed
-
-echo.
-echo [2/3] Building AutoTuner Backup Tool...
-pyinstaller --onefile --windowed --noconfirm --clean ^
-    --name "AutoTuner Backup Tool" --icon "assets\dme-icon.ico" autotuner_tool.py
-if errorlevel 1 goto :failed
-
-echo.
-echo [3/3] Building MHD Lock Tool...
-pyinstaller --onefile --windowed --noconfirm --clean ^
-    --name "MHD Lock Tool" --icon "assets\dme-icon.ico" mhd_lock_tool.py
+    --name "DME Innovation Tools" --icon "assets\dme-icon.ico" ^
+    --hidden-import autotuner_tool --hidden-import mhd_lock_tool ^
+    dme_suite.py
 if errorlevel 1 goto :failed
 
 if not exist "dist\DME Innovation Tools.exe" goto :failed
-if not exist "dist\AutoTuner Backup Tool.exe" goto :failed
-if not exist "dist\MHD Lock Tool.exe" goto :failed
 
 echo.
 echo ==========================================================
-echo   SUCCESS - executables are in the dist folder
+echo   SUCCESS - the executable is in the dist folder
 echo ==========================================================
 if not defined NOPAUSE (
     explorer dist

@@ -14,14 +14,14 @@ Bedienung und Aufbau stehen im [README](README.md).
 | Gemeinsames Design-System `dme_ui.py` | fertig, heller Look |
 | AutoTuner Backup Tool | fertig, 36 Unit-Tests + GUI-Smoke-Test |
 | MHD Lock Tool | fertig, 84 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
-| Starter `dme_suite.py` | fertig, 11 Unit-Tests + GUI-Smoke-Test |
+| Starter `dme_suite.py` | fertig, 17 Unit-Tests + GUI-Smoke-Test |
 | Windows-Setup (Inno Setup) + CI-Build | fertig |
 | README, Build-Skripte | fertig |
 
-`python -m unittest discover -s tests` → 159 Tests, grün.
+`python -m unittest discover -s tests` → 165 Tests, grün.
 
 Produktname und Version stehen zentral in `dme_brand.py`
-(`SUITE = "DME Innovation Tools"`, `VERSION = "2.1.1"`); beide Werkzeuge, das
+(`SUITE = "DME Innovation Tools"`, `VERSION = "2.2.0"`); beide Werkzeuge, das
 Setup und der Dateiname der Setup-Datei ziehen daraus.
 
 ---
@@ -328,6 +328,17 @@ Eine Installationsdatei für den PC:
 * **Gemeinsame Module statt Einzeldateien**: `dme_ui.py` und `dme_brand.py`
   sorgen dafür, dass beide Tools identisch aussehen. PyInstaller bündelt sie
   automatisch mit.
+* **Ein Programm, drei Betriebsarten** (seit 2.2.0). Drei `--onefile`-Builds
+  hießen dreimal Python plus tkinter im Setup — 36 MB, davon zwei Drittel
+  Kopie. Jetzt baut `build_exe.bat` nur `dme_suite.py`, mit
+  `--hidden-import` für die beiden Werkzeugmodule (nichts importiert sie auf
+  Modulebene, PyInstaller fände sie sonst nicht). `resolve_tool` gibt im
+  gefrorenen Zustand `[sys.executable, "--tool", key]` zurück, `main()`
+  reicht an `<modul>.main()` weiter. Getrennte Prozesse bleiben: ein Absturz
+  im einen Werkzeug lässt das andere stehen.
+  Der Installer legt weiterhin drei Startmenü-Einträge an, die beiden
+  Werkzeuge mit `Parameters:`. `[InstallDelete]` räumt die beiden alten
+  `.exe` weg — Inno entfernt nur, was es selbst ausliefert.
 * **Jeder Lock-Job bekommt ein eigenes Arbeitsverzeichnis.** Im Handbetrieb
   liegen oft mehrere Tunes in einem Ordner; getrennte Läufe machen Fehler
   eindeutig einem Kunden zuordenbar und schließen die „one and only one"-Fehler

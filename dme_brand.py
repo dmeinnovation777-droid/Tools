@@ -13,7 +13,7 @@ import tempfile
 
 VENDOR = "DME Innovation"
 SUITE = "DME Innovation Tools"
-VERSION = "2.1.1"
+VERSION = "2.2.0"
 PUBLISHER_URL = "https://github.com/dmeinnovation777-droid/Tools"
 
 # Colour of the header surface the wordmark is composited onto. Tk cannot alpha-

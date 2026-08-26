@@ -46,7 +46,7 @@ Größen bereit.
 unter *Assets*:
 
 ```
-DME-Innovation-Tools-Setup-2.1.1.exe
+DME-Innovation-Tools-Setup-2.2.0.exe
 ```
 
 Windows zeigt bei unsignierten Setups „Der Computer wurde durch Windows
@@ -58,13 +58,17 @@ Standardmäßig wird nur für den aktuellen Benutzer installiert — dann fragt
 Windows nicht nach Administratorrechten; im Assistenten lässt sich auch „für
 alle Benutzer" wählen. Deutsch und Englisch stehen zur Auswahl.
 
-Installiert werden:
+Installiert wird **eine** Programmdatei:
 
 ```
-DME Innovation Tools.exe      Starter — zeigt beide Werkzeuge zur Auswahl
-AutoTuner Backup Tool.exe
-MHD Lock Tool.exe
+DME Innovation Tools.exe      Starter und beide Werkzeuge in einem
 ```
+
+Sie trägt alle drei Programme. Im Startmenü stehen trotzdem drei Einträge — die
+beiden Werkzeuge starten dieselbe Datei mit einem Schalter
+(`--tool autotuner`, `--tool mhd`). Vorher lag jedes Werkzeug als eigene `.exe`
+vor und brachte seine eigene Kopie von Python und tkinter mit; jetzt ist die
+Laufzeit einmal drin. Das Setup ist dadurch rund ein Drittel so groß.
 
 Jeder Git-Tag `v*` baut das Setup automatisch und veröffentlicht es als Release.
 Ohne Tag hängt der Actions-Lauf es als Artefakt an. Lokal geht es mit
@@ -364,14 +368,12 @@ build_exe.bat           :: nur die drei .exe, ohne Setup
 (`winget install JRSoftware.InnoSetup`). Ergebnis:
 
 ```
-dist\DME-Innovation-Tools-Setup-2.1.1.exe
+dist\DME-Innovation-Tools-Setup-2.2.0.exe
 dist\DME Innovation Tools.exe
-dist\AutoTuner Backup Tool.exe
-dist\MHD Lock Tool.exe
 ```
 
 Ohne Windows-Rechner: der Workflow `.github/workflows/build.yml` baut auf einem
-Windows-Runner beide Programme und das Setup und hängt alles als Artefakt an den
+Windows-Runner das Programm und das Setup und hängt beides als Artefakt an den
 Lauf. Die Versionsnummer kommt aus `dme_brand.VERSION` — dort ändern, und
 Programme, Setup und Dateiname ziehen mit.
 
@@ -446,7 +448,7 @@ Dazu zwei Regeln, an die sich beide Programme halten:
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v        # 159 Tests, keine Anzeige nötig
+python -m unittest discover -s tests -v        # 165 Tests, keine Anzeige nötig
 
 # GUI-Tests (brauchen tkinter und eine Anzeige)
 xvfb-run -a -s "-screen 0  880x560x24" python tests/smoke_gui_suite.py
