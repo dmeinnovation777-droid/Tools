@@ -39,6 +39,8 @@ jobs:
         run: xvfb-run -a -s "-screen 0 1040x820x24" python tests/smoke_gui_mhd_lock.py
       - name: Suite launcher
         run: xvfb-run -a -s "-screen 0 880x560x24" python tests/smoke_gui_suite.py
+      - name: The pages stand still when you switch pages
+        run: xvfb-run -a -s "-screen 0 1100x880x24" python tests/smoke_gui_layout.py
 
   build-windows:
     name: Build Windows installer

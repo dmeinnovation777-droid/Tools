@@ -21,7 +21,7 @@ Bedienung und Aufbau stehen im [README](README.md).
 `python -m unittest discover -s tests` → 182 Tests, grün.
 
 Produktname und Version stehen zentral in `dme_brand.py`
-(`SUITE = "DME Innovation Tools"`, `VERSION = "2.3.3"`); beide Werkzeuge, das
+(`SUITE = "DME Innovation Tools"`, `VERSION = "2.3.4"`); beide Werkzeuge, das
 Setup und der Dateiname der Setup-Datei ziehen daraus.
 
 ---

@@ -46,7 +46,7 @@ Größen bereit.
 unter *Assets*:
 
 ```
-DME-Innovation-Tools-Setup-2.3.3.exe
+DME-Innovation-Tools-Setup-2.3.4.exe
 ```
 
 Windows zeigt bei unsignierten Setups „Der Computer wurde durch Windows
@@ -368,7 +368,7 @@ build_exe.bat           :: nur die drei .exe, ohne Setup
 (`winget install JRSoftware.InnoSetup`). Ergebnis:
 
 ```
-dist\DME-Innovation-Tools-Setup-2.3.3.exe
+dist\DME-Innovation-Tools-Setup-2.3.4.exe
 dist\DME Innovation Tools.exe
 ```
 
@@ -460,6 +460,7 @@ python -m unittest discover -s tests -v        # 182 Tests, keine Anzeige nötig
 xvfb-run -a -s "-screen 0  880x560x24" python tests/smoke_gui_suite.py
 xvfb-run -a -s "-screen 0 1000x800x24" python tests/smoke_gui_autotuner.py
 xvfb-run -a -s "-screen 0 1040x820x24" python tests/smoke_gui_mhd_lock.py
+xvfb-run -a -s "-screen 0 1100x880x24" python tests/smoke_gui_layout.py
 ```
 
 Der GUI-Test des Lock Tools ersetzt den lizenzierten Builder durch ein Stub-

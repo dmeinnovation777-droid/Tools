@@ -1379,15 +1379,29 @@ class MhdLockTool(_TkBase):
 
         self._build()
         self._restore_settings()
-        self.after(120, self._drain_events)
+        self._drain_id = self.after(120, self._drain_events)
+
+    def destroy(self):
+        # The queue poller is rearmed every 120 ms. Without this, closing the
+        # window leaves one pending call that fires against a widget that is
+        # already gone.
+        if getattr(self, "_drain_id", None) is not None:
+            try:
+                self.after_cancel(self._drain_id)
+            except tk.TclError:
+                pass
+            self._drain_id = None
+        super().destroy()
 
     # ── Shell ────────────────────────────────────────────────────────────────
 
     NAV = [
         {"key": "lock", "label": "Lock", "title": "Lock a tune", "icon": "lock",
-         "subtitle": LOCK_SUBTITLE},
+         "subtitle": LOCK_SUBTITLE,
+         "subtitles": [LOCK_SUBTITLE, PREPARE_SUBTITLE]},
         {"key": "batch", "label": "Batch", "title": "Batch", "icon": "batch",
-         "subtitle": BATCH_SUBTITLE},
+         "subtitle": BATCH_SUBTITLE,
+         "subtitles": [BATCH_SUBTITLE, BATCH_PREPARE_SUBTITLE]},
         {"key": "settings", "label": "Settings", "title": "Settings", "icon": "settings",
          "subtitle": "Point the tool at your own licensed MHD map builder and your key. "
                      "Set once, used for every job."},
@@ -1403,12 +1417,11 @@ class MhdLockTool(_TkBase):
         self.pages = {"lock": self._build_lock_page(),
                       "batch": self._build_batch_page(),
                       "settings": self._build_settings_page()}
+        self.shell.mount(self.pages)
         self.shell.select("lock")
 
     def _show_page(self, key):
-        for page in self.pages.values():
-            page.pack_forget()
-        self.pages[key].pack(fill=tk.BOTH, expand=True)
+        self.shell.show(key)
 
     # ── Lock page ────────────────────────────────────────────────────────────
 
@@ -2285,7 +2298,7 @@ class MhdLockTool(_TkBase):
                     handler(**payload)
         except queue.Empty:
             pass
-        self.after(120, self._drain_events)
+        self._drain_id = self.after(120, self._drain_events)
 
     def _on_event_log(self, target, line, tag):
         view = self.batch_log if target == "batch" else self.log

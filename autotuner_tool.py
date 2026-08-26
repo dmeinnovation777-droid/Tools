@@ -452,12 +452,11 @@ class AutoTunerTool(_TkBase):
         self._page_host = self.shell.host
 
         self.pages = {"z2b": self._build_zip_to_bin(), "b2z": self._build_bin_to_zip()}
+        self.shell.mount(self.pages)
         self.shell.select("z2b")
 
     def _show_page(self, key):
-        for page in self.pages.values():
-            page.pack_forget()
-        self.pages[key].pack(fill=tk.BOTH, expand=True)
+        self.shell.show(key)
 
     def _bind_shortcuts(self):
         self.bind("<Control-o>", lambda _e: (self._browse_zip() if self._active() == "z2b"
@@ -468,10 +467,9 @@ class AutoTunerTool(_TkBase):
                                                   else self._run_bin_to_zip()))
 
     def _active(self) -> str:
-        for key, page in self.pages.items():
-            if page.winfo_ismapped():
-                return key
-        return "z2b"
+        # Every page stays mapped now, so no widget can answer this. The shell
+        # knows which one is on top.
+        return self.shell.active or "z2b"
 
     # ── Page 1: ZIP → BIN ────────────────────────────────────────────────────
 

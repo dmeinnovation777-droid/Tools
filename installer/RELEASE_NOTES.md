@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-2.3.3.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-2.3.4.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -18,6 +18,35 @@ Dazu Startmenü-Einträge, auf Wunsch eine Desktop-Verknüpfung und ein Uninstal
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Korrektur in 2.3.4
+
+**Die Zeilen sind beim Seitenwechsel verrutscht.** Jeder Klick in der
+Seitenleiste hat den Inhalt ein Stück nach oben oder unten gesetzt, und auf dem
+Weg dorthin lief der ganze Aufbau noch einmal durch. Drei Ursachen, alle drei
+behoben:
+
+* **Der Kopfbereich hat nur für den Untertitel der gerade offenen Seite Platz
+  gelassen.** Lock braucht drei Zeilen, Settings eine, also sprang alles
+  darunter um 17 Pixel. Jetzt hält der Kopf immer die Höhe des längsten
+  Untertitels frei, auch für die Fassungen, die eine Einstellung erst später
+  einblendet.
+* **Beim Wechsel wurde die alte Seite abgehängt und die neue neu eingehängt.**
+  Eine frisch eingehängte Seite ist für einen Augenblick ein Pixel breit, also
+  hat jeder umbrechende Text neu umgebrochen, bevor er sich gesetzt hat. Jetzt
+  liegen alle Seiten von Anfang an in voller Größe übereinander, und ein
+  Seitenwechsel ist ein Heben, keine Neuberechnung.
+* **Die Bildlaufleiste hat sich eine eigene Spalte genommen.** Erschien sie,
+  wurde der Inhalt schmaler, der Text brach neu um, die Höhe änderte sich, und
+  die Leiste konnte dadurch wieder erscheinen. Sie schwebt jetzt am rechten
+  Rand über dem Inhalt, in der Randfläche, die ohnehin frei ist.
+
+Dazu räumt die App beim Schließen ihren Ereigniszähler auf, statt eine offene
+Rückmeldung gegen ein bereits geschlossenes Fenster laufen zu lassen.
+
+Ein neuer Test misst das nach: er merkt sich für jede Seite, auf welchem Pixel
+der Inhalt beginnt, läuft alle Seiten hin und zurück durch und schlägt fehl,
+sobald sich auch nur eine Zeile bewegt. Gegen die alte Fassung schlägt er fehl.
 
 ## Korrektur in 2.3.3
 

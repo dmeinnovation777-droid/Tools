@@ -265,13 +265,47 @@ def wrap_to_parent(label, minimum=None, inset=None):
     floor = px(280) if minimum is None else minimum
     gap = px(10) if inset is None else inset
     parent = label.master
+    last = [None]
 
     def resize(event):
+        # A frame reports width 1 for the instant between being created and
+        # being laid out. Wrapping to that makes the label tall, and everything
+        # under it drops - the jump you see is the correction.
+        if event.width <= 1:
+            return
         taken = gap() if callable(gap) else gap
-        label.configure(wraplength=max(floor, event.width - taken))
+        width = max(floor, event.width - taken)
+        # tk lays the whole branch out again on every configure(), even one
+        # that changes nothing. Only a width that is really new is worth that.
+        if width == last[0]:
+            return
+        last[0] = width
+        label.configure(wraplength=width)
 
     parent.bind("<Configure>", resize, add="+")
     return label
+
+
+def wrapped_lines(text, font, width):
+    """How many lines ``text`` needs at ``width``, by tk's own greedy rule.
+
+    Used to reserve height for something whose text changes. Reserved height
+    is what keeps the rows under it still.
+    """
+    if not text:
+        return 1
+    lines = 0
+    for paragraph in text.split("\n"):
+        lines += 1
+        current = ""
+        for word in paragraph.split():
+            candidate = word if not current else current + " " + word
+            if not current or font.measure(candidate) <= width:
+                current = candidate
+            else:
+                lines += 1
+                current = word
+    return max(1, lines)
 
 
 class Switch(tk.Canvas):
@@ -842,25 +876,44 @@ class VScroll(tk.Frame):
         self.inner = tk.Frame(self.canvas, bg=bg)
         self._window = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
         self.canvas.configure(yscrollcommand=self._on_scroll)
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.scrollbar.pack(side="right", fill="y")
+        self.canvas.pack(fill="both", expand=True)
+        # The scrollbar floats over the canvas, it does not take a column of
+        # its own. A column that comes and goes changes the canvas width, that
+        # rewraps every label, that changes the height, and that can call the
+        # scrollbar back: the page used to shiver. Floating, the canvas keeps
+        # one width for good. It lands in the page padding, over nothing.
+        self._bar_shown = False
+        self._region = None
+        self._width = None
 
         self.inner.bind("<Configure>", self._sync_region)
-        self.canvas.bind("<Configure>",
-                         lambda e: self.canvas.itemconfigure(self._window, width=e.width))
+        self.canvas.bind("<Configure>", self._fit_width)
         # Wheel only while the pointer is over this region
         self.canvas.bind("<Enter>", self._bind_wheel)
         self.canvas.bind("<Leave>", self._unbind_wheel)
 
+    def _fit_width(self, event):
+        if event.width == self._width:
+            return
+        self._width = event.width
+        self.canvas.itemconfigure(self._window, width=event.width)
+
     def _sync_region(self, _=None):
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        region = self.canvas.bbox("all")
+        if region == self._region:
+            return
+        self._region = region
+        self.canvas.configure(scrollregion=region)
 
     def _on_scroll(self, first, last):
-        # Hide the scrollbar when everything fits
-        if float(first) <= 0.0 and float(last) >= 1.0:
-            self.scrollbar.pack_forget()
-        else:
-            self.scrollbar.pack(side="right", fill="y")
+        # Hide the scrollbar when everything fits, without touching the layout
+        fits = float(first) <= 0.0 and float(last) >= 1.0
+        if fits and self._bar_shown:
+            self.scrollbar.place_forget()
+            self._bar_shown = False
+        elif not fits and not self._bar_shown:
+            self.scrollbar.place(relx=1.0, rely=0.0, relheight=1.0, anchor="ne")
+            self._bar_shown = True
         self.scrollbar.set(first, last)
 
     def _wheel(self, event):
@@ -1219,6 +1272,7 @@ class Shell(tk.Frame):
         # list is usually a class attribute that must not pick up per-instance edits.
         self._pages = dict((entry["key"], dict(entry)) for entry in nav)
         self._active = None
+        self._mounted = {}
 
         side = tk.Frame(self, bg=SURFACE, width=px(238))
         side.pack(side=tk.LEFT, fill=tk.Y)
@@ -1256,15 +1310,62 @@ class Shell(tk.Frame):
         self._title = tk.Label(bar, text="", bg=BG, fg=TEXT, font=f("h1"), anchor="w")
         self._title.pack(fill=tk.X)
         self._subtitle = tk.Label(bar, text="", bg=BG, fg=TEXT_DIM, font=f("body"),
-                                  anchor="w", justify="left", wraplength=px(720))
+                                  anchor="nw", justify="left", wraplength=px(720))
         self._subtitle.pack(fill=tk.X, pady=(px(4), 0))
         wrap_to_parent(self._subtitle, minimum=px(320), inset=px(8))
+        # The header keeps room for the longest subtitle of all pages, always.
+        # Two pages whose subtitles need a different number of lines used to
+        # move the whole page up or down on every click; this is why.
+        self._subtitle_font = tkfont.Font(font=f("body"))
+        self._subtitle_lines = None
+        bar.bind("<Configure>", self._reserve_header, add="+")
 
         self.status = StatusBar(main, f"{brand.VENDOR}  ·  {product}")
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
 
         self.host = tk.Frame(main, bg=BG)
         self.host.pack(fill=tk.BOTH, expand=True)
+
+    def _reserve_header(self, event=None):
+        width = self._subtitle.cget("wraplength")
+        if event is not None and event.width > 1:
+            width = max(px(320), event.width - px(8))
+        # Not just the subtitle a page shows now: every subtitle it can ever
+        # show. A setting that rewords the header must not move the page under
+        # it either. A nav entry lists its alternatives under "subtitles".
+        lines = 1
+        for page in self._pages.values():
+            for text in page.get("subtitles") or [page.get("subtitle", "")]:
+                lines = max(lines, wrapped_lines(text, self._subtitle_font, width))
+        if lines == self._subtitle_lines:
+            return
+        self._subtitle_lines = lines
+        self._subtitle.configure(height=lines)
+
+    def mount(self, pages):
+        """Put every page into the host at full size, and leave it there.
+
+        Packing one page and unpacking the others on every click was the
+        visible flaw: a page that has just been packed is one pixel wide for an
+        instant, so every wrapped label reflows, the scroll region is measured
+        again, and the rows settle in front of you. Placed, all pages carry the
+        host's size from the first layout on, and a page change is one lift().
+        """
+        self._mounted = dict(pages)
+        for page in self._mounted.values():
+            page.place(x=0, y=0, relwidth=1.0, relheight=1.0)
+        self.show(self._active)
+
+    def show(self, key):
+        page = self._mounted.get(key)
+        if page is not None:
+            page.lift()
+
+    @property
+    def active(self):
+        """The key of the page on top. Every page stays mapped, so no widget
+        can answer this any more."""
+        return self._active
 
     def select(self, key):
         if key == self._active:
@@ -1280,5 +1381,6 @@ class Shell(tk.Frame):
     def set_subtitle(self, key, text):
         """Reword a page header when a setting changes what the page does."""
         self._pages[key]["subtitle"] = text
+        self._reserve_header()
         if self._active == key:
             self._subtitle.configure(text=text)
