@@ -463,7 +463,7 @@ Dazu zwei Regeln, an die sich beide Programme halten:
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v        # 259 Tests, keine Anzeige nötig
+python -m unittest discover -s tests -v        # 261 Tests, keine Anzeige nötig
 
 # GUI-Tests (brauchen tkinter und eine Anzeige)
 xvfb-run -a -s "-screen 0 1120x860x24" python tests/smoke_gui_suite.py

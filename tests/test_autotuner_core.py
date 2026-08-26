@@ -457,6 +457,26 @@ class TestTheCarComesBackWithTheLayout(unittest.TestCase):
             self.assertIn(name, at.INI_KEYS,
                           f"{name} is written but can never be carried across")
 
+    def test_every_box_on_the_page_has_a_name_here_too(self):
+        """Packing looks each box up by name. A new one without an entry here
+        would not be missing quietly, it would stop the archive being written."""
+        for key, _label, _hint in at.META_FIELDS:
+            self.assertIn(key, at.INI_KEYS,
+                          f"the {key} box has no place in contents.ini")
+
+    def test_an_older_store_is_not_broken_by_this(self):
+        """Layouts remembered before 3.2.1 carry no vehicle data at all."""
+        old = {"80": {"label": "alt.zip",
+                      "parts": [{"name": "iflash0.bin", "size": 64},
+                                {"name": "dflash0.bin", "size": 16}]}}
+        self.assertEqual(at.remembered_meta(80, store=old), {})
+        self.assertEqual(at.layout_for_size(80, store=old)[1], "alt.zip")
+        # And writing to it keeps what was there while adding what is new.
+        store = at.remember_layout(self.parts, "gle.zip", store=old,
+                                   meta=self.meta)
+        self.assertEqual(at.remembered_meta(80, store=store)["VehicleSeries"],
+                         "W167")
+
     def test_the_round_trip_keeps_the_whole_ini(self):
         """Archive to .bin to archive, and contents.ini comes back identical."""
         source = os.path.join(self.tmp.name, "backup.zip")
