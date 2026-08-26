@@ -43,17 +43,36 @@ def _kill_tree(process):
         pass
 
 
+def _annotate(message):
+    """Say it where it can still be read when the log cannot be.
+
+    A workflow command becomes an annotation on the run, and an annotation
+    comes back through the API. The plain log does not, from everywhere.
+    """
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    flat = message.replace("\r", "").replace("\n", "%0A")[:3000]
+    print(f"::error title=frozen app::{flat}", flush=True)
+
+
 def check(exe, key):
     """Start the app the way `key` names it, let it live, then stop it."""
     command = [exe] if key is None else [exe, suite.TOOL_FLAG, key]
     handle, log = tempfile.mkstemp(prefix=f"frozen_{key or 'plain'}_", suffix=".log")
     os.close(handle)
+    started = time.time()
     with open(log, "w", encoding="utf-8", errors="replace") as sink:
         process = subprocess.Popen(command,
                                    stdout=sink, stderr=subprocess.STDOUT,
                                    stdin=subprocess.DEVNULL)
-        time.sleep(SETTLE)
-        alive = process.poll() is None
+        # Waited out in small steps rather than one sleep, so a window that
+        # dies early is caught with its exit code instead of being reported
+        # eight seconds later as simply absent.
+        deadline = started + SETTLE
+        while time.time() < deadline and process.poll() is None:
+            time.sleep(0.25)
+        code = process.poll()
+        alive = code is None
         _kill_tree(process)
 
     with open(log, encoding="utf-8", errors="replace") as source:
@@ -61,13 +80,17 @@ def check(exe, key):
     os.unlink(log)
 
     how = "no flag" if key is None else f"--tool {key}"
+    lived = time.time() - started
     broke = "Traceback" in output or "ModuleNotFoundError" in output
     if alive and not broke:
         print(f"  ok      {how}", flush=True)
         return True
-    print(f"  FAILED  {how}  (still running: {alive})", flush=True)
-    for line in output.splitlines()[-8:]:
+    print(f"  FAILED  {how}  (still running: {alive}, exit code: {code}, "
+          f"lived {lived:.1f}s)", flush=True)
+    for line in output.splitlines()[-12:]:
         print(f"          {line}", flush=True)
+    _annotate(f"{how}: exit code {code} after {lived:.1f}s\n"
+              + ("\n".join(output.splitlines()[-12:]) or "(it said nothing at all)"))
     return False
 
 
