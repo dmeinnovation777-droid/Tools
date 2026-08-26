@@ -258,3 +258,154 @@ class TestPresets(unittest.TestCase):
     def test_every_preset_has_metadata(self):
         for name in at.PRESETS:
             self.assertIn(name, at.PRESET_META, name)
+
+
+# A real AutoTuner writes this page in the operator's language. This is what a
+# German bench read actually carries - shortened, but with the traits that
+# matter: the translated notice and the two extra meta lines.
+GERMAN_HOW_TO = (
+    '<!DOCTYPE html>\r\n<html lang="en">\r\n<head>\r\n'
+    '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">\r\n'
+    '<meta name="viewport" content="width=device-width, initial-scale=1">\r\n'
+    '<meta http-equiv="X-UA-Compatible" content="IE=edge">\r\n'
+    "<title>Autotuner</title>\r\n</head>\r\n<body>\r\n"
+    '<p id="message"/>\r\n<script type="text/javascript">\r\n'
+    'document.getElementById("message").innerHTML ="Ihr Browser ist derzeit '
+    'nicht mit dem Internet verbunden.";\r\n'
+    "</script>\r\n</body>\r\n</html>"
+)
+
+
+class TestHowToPageIsCarriedAcross(unittest.TestCase):
+    """The page is translated by the AutoTuner, so it cannot be regenerated.
+
+    Found on a real VW Caddy MD1CS004 bench read: the archive carried the German
+    page (708 bytes), while the tool - and the original tool it is modelled on -
+    wrote its own English one (536 bytes) over it.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+        self.zip = os.path.join(self.dir, "backup.zip")
+        with zipfile.ZipFile(self.zip, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("iflash0.bin", b"\x11" * 64)
+            zf.writestr("dflash0.bin", b"\x22" * 16)
+            zf.writestr("contents.ini", at.build_contents_ini({"make": "Volkswagen"}))
+            zf.writestr(at.HOW_TO_NAME, GERMAN_HOW_TO)
+        self.bin = os.path.join(self.dir, "combined.bin")
+        self.config = [{"name": "iflash0.bin", "size": 64},
+                       {"name": "dflash0.bin", "size": 16}]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_reading_an_archive_surfaces_the_page(self):
+        self.assertEqual(at.read_archive_info(self.zip)["how_to"], GERMAN_HOW_TO)
+
+    def test_a_given_page_is_written_unchanged(self):
+        out = os.path.join(self.dir, "out.zip")
+        at.bin_to_zip(self.bin_path_written(), out, self.config, {},
+                      how_to_html=GERMAN_HOW_TO)
+        with zipfile.ZipFile(out) as zf:
+            self.assertEqual(zf.read(at.HOW_TO_NAME).decode(), GERMAN_HOW_TO)
+
+    def test_without_one_the_english_default_still_ships(self):
+        out = os.path.join(self.dir, "out.zip")
+        at.bin_to_zip(self.bin_path_written(), out, self.config, {})
+        with zipfile.ZipFile(out) as zf:
+            self.assertEqual(zf.read(at.HOW_TO_NAME).decode(), at.HOW_TO_USE_HTML)
+
+    def test_the_whole_archive_comes_back_byte_for_byte(self):
+        """The point of the exercise: what went in comes out unchanged."""
+        ok, _, parts = at.zip_to_bin(self.zip, self.bin)
+        self.assertTrue(ok)
+        info = at.read_archive_info(self.zip)
+        out = os.path.join(self.dir, "rebuilt.zip")
+        at.bin_to_zip(self.bin, out,
+                      [{"name": p["name"], "size": p["size"]} for p in parts],
+                      {"make": "Volkswagen"}, how_to_html=info["how_to"])
+        with zipfile.ZipFile(self.zip) as a, zipfile.ZipFile(out) as b:
+            self.assertEqual(a.namelist(), b.namelist())
+            for name in a.namelist():
+                self.assertEqual(a.read(name), b.read(name), name)
+
+    def bin_path_written(self):
+        with open(self.bin, "wb") as f:
+            f.write(b"\x11" * 64 + b"\x22" * 16)
+        return self.bin
+
+
+class TestTheRememberedPage(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = self.tmp.name
+        self.parts = [{"name": "iflash0.bin", "size": 64},
+                      {"name": "dflash0.bin", "size": 16}]
+
+    def tearDown(self):
+        if self.env is None:
+            os.environ.pop("XDG_CONFIG_HOME", None)
+        else:
+            os.environ["XDG_CONFIG_HOME"] = self.env
+        self.tmp.cleanup()
+
+    def test_it_survives_a_restart(self):
+        at.remember_layout(self.parts, "Caddy", how_to=GERMAN_HOW_TO)
+        self.assertEqual(at.remembered_how_to(80), GERMAN_HOW_TO)
+
+    def test_a_later_layout_without_one_does_not_lose_it(self):
+        at.remember_layout(self.parts, "Caddy", how_to=GERMAN_HOW_TO)
+        at.remember_layout(self.parts, "same size, no page")
+        self.assertEqual(at.remembered_how_to(80), GERMAN_HOW_TO)
+
+    def test_an_unknown_size_gives_an_empty_page(self):
+        self.assertEqual(at.remembered_how_to(999999), "")
+
+
+class TestPresetsAgainstRealReads(unittest.TestCase):
+    """Presets decide how a .bin is cut when nothing else is known.
+
+    A preset that adds up to the right total but cuts in the wrong places writes
+    an archive the device never produces - and the total is what selects it, so
+    the mistake is invisible. These are the layouts observed on real AutoTuner
+    bench reads.
+    """
+
+    REAL = {
+        # ECU        total       parts as the device actually writes them
+        "MG1CP002": (8912896, [("iflash0.bin", 8388608), ("dflash0.bin", 524288)]),
+    }
+
+    def test_preset_matches_the_observed_layout(self):
+        for ecu, (total, parts) in self.REAL.items():
+            self.assertEqual(at.PRESETS[ecu], parts, ecu)
+            self.assertEqual(sum(s for _, s in at.PRESETS[ecu]), total, ecu)
+
+    def test_the_total_still_selects_it(self):
+        for ecu, (total, _) in self.REAL.items():
+            self.assertEqual(at.preset_for_size(total), ecu)
+
+    def test_presets_with_the_same_total_cut_the_same_way(self):
+        """The total is all that selects a preset, so two presets sharing one
+        must at least agree on where to cut. MED17.1.1 and MEVD17.2.x do - they
+        differ only in the ECU name, which is why the banner names both."""
+        by_total = {}
+        for name, parts in at.PRESETS.items():
+            by_total.setdefault(sum(s for _, s in parts), []).append(name)
+        for total, names in by_total.items():
+            layouts = {tuple(at.PRESETS[n]) for n in names}
+            self.assertEqual(len(layouts), 1,
+                             f"{names} share {total:,} bytes but cut differently")
+
+    def test_an_ambiguous_total_is_reported_not_hidden(self):
+        self.assertEqual(at.presets_for_size(4259840), ["MED17.1.1", "MEVD17.2.x"])
+        self.assertEqual(at.presets_for_size(8912896), ["MG1CP002"])
+        self.assertEqual(at.presets_for_size(1), [])
+
+    def test_a_remembered_layout_outranks_a_preset(self):
+        """The device's own split must win over any guess with the same total."""
+        import inspect
+        src = inspect.getsource(at.AutoTunerTool._auto_layout)
+        self.assertLess(src.index("layout_for_size"), src.index("presets_for_size"))

@@ -46,7 +46,7 @@ Größen bereit.
 unter *Assets*:
 
 ```
-DME-Innovation-Tools-Setup-2.1.0.exe
+DME-Innovation-Tools-Setup-2.1.1.exe
 ```
 
 Windows zeigt bei unsignierten Setups „Der Computer wurde durch Windows
@@ -126,8 +126,13 @@ contents.ini          Fahrzeug-/ECU-Metadaten
 how-to-use-backup.html
 ```
 
-Die Teile liegen direkt im Archivwurzelverzeichnis (nicht in einem Unterordner) —
-`contents.ini` und `how-to-use-backup.html` sind byteweise im Originalformat.
+Die Teile liegen direkt im Archivwurzelverzeichnis (nicht in einem Unterordner).
+Die `contents.ini` wird aus den Feldern neu geschrieben — an echten Backups
+byteweise gegengeprüft. Die `how-to-use-backup.html` schreibt der AutoTuner in
+der Sprache des Bedieners; sie lässt sich deshalb nicht erzeugen, sondern wird
+aus dem Ursprungsarchiv **übernommen** und mit der Aufteilung gemerkt. Nur wenn
+eine `.bin` nie aus einem Archiv kam, kommt die eingebaute englische Fassung zum
+Zug.
 
 ### Tastenkürzel
 
@@ -359,7 +364,7 @@ build_exe.bat           :: nur die drei .exe, ohne Setup
 (`winget install JRSoftware.InnoSetup`). Ergebnis:
 
 ```
-dist\DME-Innovation-Tools-Setup-2.1.0.exe
+dist\DME-Innovation-Tools-Setup-2.1.1.exe
 dist\DME Innovation Tools.exe
 dist\AutoTuner Backup Tool.exe
 dist\MHD Lock Tool.exe
@@ -441,7 +446,7 @@ Dazu zwei Regeln, an die sich beide Programme halten:
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v        # 147 Tests, keine Anzeige nötig
+python -m unittest discover -s tests -v        # 159 Tests, keine Anzeige nötig
 
 # GUI-Tests (brauchen tkinter und eine Anzeige)
 xvfb-run -a -s "-screen 0  880x560x24" python tests/smoke_gui_suite.py

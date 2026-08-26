@@ -52,8 +52,11 @@ PRESETS = {
     "MEVD17.2.x": [("iflash0.bin", 2097152), ("iflash1.bin", 2097152),
                    ("dflash0.bin", 32768), ("dflash1.bin", 32768)],
 }
-PRESETS["MG1CP002"] = [("iflash0.bin", 4194304), ("iflash1.bin", 4194304),
-                       ("dflash0.bin", 262144), ("dflash1.bin", 262144)]
+# Measured, not guessed: a real Mercedes GLE 2018 bench read off an AutoTuner
+# splits its 8,912,896 bytes as two parts, not four. The four-part guess that
+# stood here added up to the same total and would have written an archive the
+# device never produces.
+PRESETS["MG1CP002"] = [("iflash0.bin", 8388608), ("dflash0.bin", 524288)]
 PRESET_META = {
     "MED17.1.1": {"EcuBuild": "MED17.1.1", "EcuProducer": "Bosch", "EngineType": "PETROL"},
     "MED17.5.x": {"EcuBuild": "MED17.5", "EcuProducer": "Bosch", "EngineType": "PETROL"},
@@ -85,14 +88,23 @@ def load_layouts() -> dict:
         return {}
 
 
-def remember_layout(parts: list[dict], label: str = "", store: dict = None) -> dict:
-    """Store one layout under its total size. Returns the updated store."""
+def remember_layout(parts: list[dict], label: str = "", store: dict = None,
+                    how_to: str = "") -> dict:
+    """Store one layout under its total size. Returns the updated store.
+
+    `how_to` is the archive's own how-to-use-backup.html, kept with the layout so
+    a .bin split months later still gets the page in the right language."""
     parts = [{"name": p["name"], "size": int(p["size"])} for p in parts if p.get("name")]
     if not parts:
         return store if store is not None else load_layouts()
     layouts = load_layouts() if store is None else store
     total = sum(p["size"] for p in parts)
-    layouts[str(total)] = {"label": label, "parts": parts}
+    entry = {"label": label, "parts": parts}
+    if how_to:
+        entry["how_to"] = how_to
+    elif isinstance(layouts.get(str(total)), dict):
+        entry["how_to"] = layouts[str(total)].get("how_to", "")   # never lose one
+    layouts[str(total)] = entry
     if len(layouts) > LAYOUT_LIMIT:
         for key in list(layouts)[:len(layouts) - LAYOUT_LIMIT]:
             layouts.pop(key, None)
@@ -112,6 +124,21 @@ def layout_for_size(size: int, store: dict = None) -> tuple[list[dict], str] | N
     if not entry or not entry.get("parts"):
         return None
     return entry["parts"], entry.get("label", "")
+
+
+def remembered_how_to(size: int, store: dict = None) -> str:
+    """The how-to-use page that came with the archive of this total size."""
+    layouts = load_layouts() if store is None else store
+    entry = layouts.get(str(int(size)))
+    return (entry or {}).get("how_to", "")
+
+
+def presets_for_size(size: int) -> list[str]:
+    """Every preset with this total. More than one means the size alone cannot
+    tell the ECUs apart - they cut identically, but the name differs, and the
+    name is what lands in the customer's contents.ini."""
+    return [name for name, parts in PRESETS.items()
+            if sum(part_size for _, part_size in parts) == size]
 
 
 def preset_for_size(size: int) -> str | None:
@@ -194,6 +221,12 @@ def build_contents_ini(meta: dict = None) -> str:
     return "\r\n".join(ini_lines) + "\r\n"
 
 
+HOW_TO_NAME = "how-to-use-backup.html"
+
+# The fallback only. A real backup carries this page translated into the
+# operator's language - a German read has the offline notice in German and two
+# extra <meta> lines - so whenever the source archive is known its own copy is
+# carried across instead. Verified against a VW Caddy MD1CS004 bench read.
 HOW_TO_USE_HTML = (
     "<!DOCTYPE html>\r\n<html lang=\"en\">\r\n<head>\r\n"
     "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">\r\n"
@@ -210,10 +243,14 @@ HOW_TO_USE_HTML = (
 
 
 def bin_to_zip(bin_path: str, output_path: str, parts_config: list[dict],
-               ini_meta: dict = None) -> tuple[bool, str]:
+               ini_meta: dict = None, how_to_html: str = "") -> tuple[bool, str]:
     """
     Split a .bin file into named parts per parts_config and pack into an AutoTuner .zip.
     parts_config = [{'name': str, 'size': int}, ...]  — sizes must sum to bin file size.
+
+    `how_to_html` is the source archive's own how-to-use-backup.html. Pass it and
+    it is carried across unchanged; the built-in English page is only the
+    fallback for a .bin that never came from an archive.
     """
     try:
         with open(bin_path, 'rb') as f:
@@ -236,7 +273,7 @@ def bin_to_zip(bin_path: str, output_path: str, parts_config: list[dict],
                 zf.writestr(part['name'], chunk)
                 offset += part['size']
             zf.writestr("contents.ini", ini_content)
-            zf.writestr("how-to-use-backup.html", HOW_TO_USE_HTML)
+            zf.writestr(HOW_TO_NAME, how_to_html or HOW_TO_USE_HTML)
 
         return True, (f"Created {len(parts_config)} part(s) → "
                       f"{os.path.getsize(output_path):,} bytes")
@@ -280,7 +317,12 @@ def read_archive_info(zip_path: str) -> dict:
         meta = {}
         if 'contents.ini' in names:
             meta = parse_ini(zf.read('contents.ini').decode('utf-8', errors='replace'))
-    return {'parts': parts, 'extras': extras, 'meta': meta,
+        # The AutoTuner writes this page in the operator's language. It cannot be
+        # reconstructed, only carried across - so read it out while we are here.
+        how_to = ""
+        if HOW_TO_NAME in names:
+            how_to = zf.read(HOW_TO_NAME).decode('utf-8', errors='replace')
+    return {'parts': parts, 'extras': extras, 'meta': meta, 'how_to': how_to,
             'total': offset, 'count': len(parts)}
 
 
@@ -579,8 +621,9 @@ class AutoTunerTool(_TkBase):
         self.update_idletasks()
 
         ok, msg, parts = zip_to_bin(zip_path, out_path)
+        how_to = (self._archive_info or {}).get("how_to", "")
         if ok:
-            remember_layout(parts, os.path.basename(zip_path))
+            remember_layout(parts, os.path.basename(zip_path), how_to=how_to)
             self._z2b_banner.show("ok", f"{msg}\n{out_path}",
                                   action_text="Show in folder",
                                   action=lambda: ui.reveal_in_file_manager(out_path))
@@ -789,11 +832,20 @@ class AutoTunerTool(_TkBase):
                                         f"sizes match.")
             self.status.set(f"Layout restored · {len(parts)} part(s)", "ok")
             return
-        preset = preset_for_size(size)
-        if preset:
-            self._load_preset(preset)
-            self._b2z_banner.show("info", f"File size matches the {preset} layout — "
-                                          f"preset applied.")
+        candidates = presets_for_size(size)
+        if candidates:
+            self._load_preset(candidates[0])
+            if len(candidates) > 1:
+                # Same split either way - but the ECU name goes into the
+                # customer's contents.ini, so do not let it be a silent guess.
+                others = ", ".join(candidates[1:])
+                self._b2z_banner.show(
+                    "warn", f"This size fits {' and '.join(candidates)} — the split is "
+                            f"the same, {candidates[0]} was filled in. Check the ECU "
+                            f"field if this is a {others}.")
+            else:
+                self._b2z_banner.show("info", f"File size matches the {candidates[0]} "
+                                              f"layout — preset applied.")
             return
         self._empty_hint(size)
 
@@ -830,7 +882,8 @@ class AutoTunerTool(_TkBase):
         except Exception as e:
             self._b2z_banner.show("error", f"Could not read the ZIP template: {e}")
             return
-        remember_layout(info['parts'], os.path.basename(path))
+        remember_layout(info['parts'], os.path.basename(path),
+                        how_to=info.get('how_to', ''))
         self._clear_part_rows()
         for part in info['parts']:
             self._add_part_row(name=part['name'], size=part['size'])
@@ -892,7 +945,11 @@ class AutoTunerTool(_TkBase):
         self._b2z_banner.show("busy", "Working…")
         self.update_idletasks()
 
-        ok, msg = bin_to_zip(bin_path, out_path, parts_config, meta)
+        # The page belongs to the archive this .bin came out of - look it up by
+        # the size that identifies that archive.
+        ok, msg = bin_to_zip(
+            bin_path, out_path, parts_config, meta,
+            how_to_html=remembered_how_to(sum(p['size'] for p in parts_config)))
         if ok:
             self._b2z_banner.show("ok", f"{msg}\n{out_path}",
                                   action_text="Show in folder",

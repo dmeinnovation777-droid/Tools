@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-2.1.0.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-2.1.1.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -18,6 +18,29 @@ Dazu Startmenü-Einträge, auf Wunsch eine Desktop-Verknüpfung und ein Uninstal
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Korrekturen in 2.1.1
+
+Am **AutoTuner Backup Tool**, gefunden an fünf echten Bench-Reads (Mercedes GLE
+MG1CP002, zweimal BMW X5 MG1CS201, zweimal VW Caddy MD1CS004):
+
+* **Das MG1CP002-Preset schnitt an der falschen Stelle.** Es stand auf vier
+  Teilen (4 MB + 4 MB + 256 KB + 256 KB). Ein echter Mercedes-Read desselben
+  Steuergeräts hat **zwei** Teile: 8 MB + 512 KB. Die Summe war zufällig
+  dieselbe, und weil die Dateigröße das Preset auswählt, wäre daraus
+  stillschweigend ein Archiv entstanden, das der AutoTuner so nie schreibt.
+  Jetzt steht dort die gemessene Aufteilung.
+* **Die `how-to-use-backup.html` wird nicht mehr überschrieben.** Der AutoTuner
+  legt diese Seite in der Sprache des Bedieners ab — ein deutscher Read trägt
+  die Meldung auf Deutsch. Das Werkzeug hat sie beim Zurückpacken durch eine
+  englische Fassung ersetzt. Sie wird jetzt aus dem Ursprungsarchiv übernommen
+  und zusammen mit der Aufteilung gemerkt, überlebt also auch einen Neustart.
+* **Passt eine Dateigröße auf zwei Steuergeräte**, sagt das Werkzeug es jetzt.
+  MED17.1.1 und MEVD17.2.x schneiden identisch, aber der Name landet in der
+  `contents.ini` des Kunden — das war vorher ein stiller Rateschritt.
+
+Ergebnis: alle fünf Backups gehen **ZIP → BIN → ZIP byteidentisch** durch —
+jede Datei, gleiche Reihenfolge, gleiche Archivgröße.
 
 ## Neu in 2.1.0
 

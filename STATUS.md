@@ -12,16 +12,16 @@ Bedienung und Aufbau stehen im [README](README.md).
 | --- | --- |
 | Branding-Pipeline aus dem Vektor-Logo | fertig |
 | Gemeinsames Design-System `dme_ui.py` | fertig, heller Look |
-| AutoTuner Backup Tool | fertig, 24 Unit-Tests + GUI-Smoke-Test |
+| AutoTuner Backup Tool | fertig, 36 Unit-Tests + GUI-Smoke-Test |
 | MHD Lock Tool | fertig, 84 Unit-Tests + GUI-Smoke-Test mit Builder-Stub |
 | Starter `dme_suite.py` | fertig, 11 Unit-Tests + GUI-Smoke-Test |
 | Windows-Setup (Inno Setup) + CI-Build | fertig |
 | README, Build-Skripte | fertig |
 
-`python -m unittest discover -s tests` → 147 Tests, grün.
+`python -m unittest discover -s tests` → 159 Tests, grün.
 
 Produktname und Version stehen zentral in `dme_brand.py`
-(`SUITE = "DME Innovation Tools"`, `VERSION = "2.1.0"`); beide Werkzeuge, das
+(`SUITE = "DME Innovation Tools"`, `VERSION = "2.1.1"`); beide Werkzeuge, das
 Setup und der Dateiname der Setup-Datei ziehen daraus.
 
 ---
@@ -35,13 +35,52 @@ Bewusst anders:
 * Die Archivvorschau sortiert die Teile jetzt genauso wie der Schreibvorgang.
   Vorher konnten angezeigte Offsets von der erzeugten `.bin` abweichen, wenn die
   Teile im ZIP in anderer Reihenfolge lagen.
-* Presets für MED17.1.1, MED17.5.x und MEVD17.2.x statt nur MED17.1.1; passt die
-  Dateigröße zu einem Layout, wird es automatisch vorgeschlagen.
+* Presets für MED17.1.1, MED17.5.x, MEVD17.2.x und MG1CP002 statt nur MED17.1.1;
+  passt die Dateigröße zu einem Layout, wird es automatisch vorgeschlagen.
+  MED17.1.1 und MEVD17.2.x teilen sich eine Gesamtgröße und schneiden identisch —
+  der Hinweis nennt seitdem beide, weil der ECU-Name in die `contents.ini` des
+  Kunden geht.
+* **Die `how-to-use-backup.html` wird übernommen statt neu geschrieben.** Das
+  Original tut Letzteres, mit einer fest verdrahteten englischen Fassung — der
+  AutoTuner schreibt die Seite aber übersetzt (ein deutscher Read trägt die
+  Offline-Meldung auf Deutsch und zwei zusätzliche `<meta>`-Zeilen). Sie wird
+  jetzt mit der Aufteilung gemerkt und beim Zurückpacken durchgereicht.
 * Proportionsbalken für die Aufteilung, reaktive Pfad-Hinweise, Inline-Banner
   statt modaler Popups, Tastenkürzel.
 * Zwei Darstellungsfehler behoben: abgeschnittenes Eingabelabel und ein
   abgeschnittener „Browse"-Button im Scrollbereich (inneres Frame wurde nicht
   auf die Canvas-Breite gesetzt). Zusätzlich Mausrad-Unterstützung unter X11.
+
+### 2.1 Gegenprobe an echten Backups
+
+Fünf echte AutoTuner-Bench-Reads vom Kunden, alle mit demselben Gerät gelesen:
+
+| Fahrzeug | ECU | Aufteilung | gesamt |
+| --- | --- | --- | --- |
+| Mercedes GLE 2018 | MG1CP002 | 8.388.608 + 524.288 | 8.912.896 |
+| BMW X5 2019 (2×) | MG1CS201 | 8.388.608 + 868.352 | 9.256.960 |
+| VW Caddy 2021 (2×) | MD1CS004 | 8.388.608 + 868.352 | 9.256.960 |
+
+**Alle fünf gehen ZIP → BIN → ZIP byteidentisch durch** — jede Datei, gleiche
+Reihenfolge, gleiche Archivgröße. Zwei Befunde kamen dabei heraus:
+
+1. **Das MG1CP002-Preset war falsch.** Es stand auf 4 MB + 4 MB + 256 KB +
+   256 KB — dieselbe Summe wie die Wirklichkeit, aber an den falschen Stellen
+   geschnitten. Der echte Mercedes-Read liefert zwei Teile, 8 MB + 512 KB. Weil
+   die Gesamtgröße das Preset auswählt, wäre der Fehler unsichtbar geblieben.
+   Ein Test hält das Preset jetzt an der gemessenen Aufteilung fest.
+2. **Die `how-to-use-backup.html` ist übersetzt** (siehe oben).
+
+Nebenbefund ohne Handlungsbedarf: MG1CS201 und MD1CS004 haben dieselbe
+Gesamtgröße, also denselben Schlüssel im Layout-Gedächtnis. Ihre Aufteilung ist
+identisch, die Kollision damit folgenlos. Das gemerkte Layout hat ohnehin
+Vorrang vor jedem Preset (`_auto_layout`), auch das hält ein Test fest.
+
+Zur Herkunft: `AutoTunerBackupTool.exe` (PyInstaller, Python 3.13) und der
+zugehörige Quelltext lagen zum Vergleich vor. `zip_to_bin`, `bin_to_zip`,
+Teilereihenfolge und `contents.ini`-Format stimmen mit dem Original überein;
+der einzige Unterschied in `part_sort_key` ist unsere Absicherung gegen einen
+leeren Dateinamen.
 
 ---
 
