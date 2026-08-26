@@ -7,6 +7,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Several commits in a row used to leave several full builds running side by
+# side, and the Windows one counts double against the account's minutes. Only
+# the newest push of a branch is worth building: the older ones are out of date
+# before they finish.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 # Needed so a tagged build can publish the installer as a release asset.
 permissions:
   contents: write
