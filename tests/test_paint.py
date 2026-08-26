@@ -149,6 +149,59 @@ class TestTheRoundedRectangle(unittest.TestCase):
         self.assertEqual(pixel_at(rows, 20, 10), paint.rgb(self.FILL))
 
 
+class TestTheFastWayAgreesWithThePlainWay(unittest.TestCase):
+    """panel_rows leans on two shortcuts. This is what holds them honest.
+
+    It works a shape out by its edges only: a line is the same on the left as
+    on the right, and away from the corners one line is the same as the next.
+    `_panel_rows` makes no such assumption and goes pixel by pixel. Where the
+    two ever disagree, the fast one is wrong.
+    """
+
+    CASES = [
+        # width, height, radius, border, border width
+        (60, 40, 10, None, 1.0),
+        (60, 40, 10, "#DCDCE1", 1.0),
+        (1, 1, 0, None, 1.0),
+        (3, 3, 1, "#DCDCE1", 1.0),
+        (30, 30, 15, None, 1.0),          # a circle
+        (30, 30, 15, "#FFAA00", 3.0),     # a ring
+        (200, 8, 4, None, 1.0),           # far wider than it is tall
+        (8, 200, 4, "#E8E8EC", 1.0),      # and the other way round
+        (41, 27, 9, "#E8E8EC", 1.0),      # odd numbers on both sides
+        (40, 20, 999, None, 1.0),         # a radius larger than the shape
+        (24, 24, 12, "#177A44", 12.0),    # a border thicker than the radius
+    ]
+
+    def test_the_two_agree_everywhere(self):
+        for width, height, radius, border, thickness in self.CASES:
+            with self.subTest(size=(width, height), radius=radius,
+                              border=border, thickness=thickness):
+                fast = paint.panel_rows(width, height, radius, "#FFAA00",
+                                        "#FFFFFF", border, thickness)
+                plain = paint._panel_rows(width, height, radius, "#FFAA00",
+                                          "#FFFFFF", border, thickness)
+                self.assertEqual(len(fast), len(plain))
+                self.assertEqual(fast, plain)
+
+    def test_a_shadow_makes_the_picture_taller_but_not_the_shape(self):
+        plain = paint.panel_rows(40, 20, 8, "#FFAA00", "#FFFFFF")
+        shadowed = paint.panel_rows(40, 20, 8, "#FFAA00", "#FFFFFF",
+                                    shadow=(1, 3, "#8F5C00", 0.35))
+        self.assertEqual(len(plain), 20)
+        self.assertGreater(len(shadowed), 20)
+        # The shape has not moved: its middle line is still its middle line.
+        self.assertEqual(pixel_at(shadowed, 20, 10), paint.rgb("#FFAA00"))
+
+    def test_the_shadow_is_darker_under_the_shape_than_beside_it(self):
+        rows = paint.panel_rows(40, 20, 8, "#FFAA00", "#FFFFFF",
+                                shadow=(2, 3, "#000000", 0.5))
+        under = sum(pixel_at(rows, 20, 21))
+        beside = sum(pixel_at(rows, 0, 21))
+        self.assertLess(under, beside, "there is no shadow under the shape")
+        self.assertLessEqual(beside, sum(paint.rgb("#FFFFFF")))
+
+
 class TestTheDistanceItIsAllBuiltOn(unittest.TestCase):
 
     def test_inside_is_negative_outside_is_positive_edge_is_nought(self):

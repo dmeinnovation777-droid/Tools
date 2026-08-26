@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-3.1.1.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-3.2.0.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -23,6 +23,60 @@ ein Uninstaller.
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Neu in 3.2.0: das Design
+
+Der Entwurf, den Du hast machen lassen, ist eingebaut. Er ist es an der Stelle
+genau: dieselbe Palette, dieselben Radien, dieselben Schatten, dieselben
+Schriftgrößen.
+
+tkinter kann von sich aus keine runde Ecke, keinen weichen Schatten und keine
+glatte Kante. Es kann aber ein Bild anzeigen, und jeder Grund in dieser App ist
+eine einzige bekannte Fläche. Also wird jede runde Form ausgerechnet, gegen
+genau diesen Grund, und als Bild übergeben. Das PNG dafür ist von Hand
+geschrieben. Es kommt nichts dazu, was auf Deinem Rechner installiert sein
+müsste.
+
+Was Du siehst:
+
+* **Runde, saubere Formen.** Felder als Mulden mit Radius zehn, Knöpfe mit
+  einem Schatten von einem Haar. Der Amber-Knopf trägt seine eigene Farbe im
+  Schatten, weil ein grauer Schatten unter warmem Gelb wie Schmutz aussieht.
+* **Die Schritt-Ringe.** Erledigt ist ein voller grüner Kreis mit einem
+  gezeichneten Haken, laufend ein weißer mit dickem Amber-Rand und seiner
+  Zahl, kommend ein weißer mit dünner grauer Linie.
+* **Ein Symbol je Schritt.** Blatt, Schild, Raute, Schloss, Liste, Archiv. Man
+  sieht, worum es in einem Schritt geht, bevor man den Titel liest.
+* **Die wandernde Linie.** Der laufende Schritt zeigt eine Amber-Linie, die
+  gleichmäßig von links nach rechts läuft. Sie erscheint erst, wenn Du die
+  Aktion drückst, und verschwindet erst, wenn der Schritt ehrlich fertig oder
+  ehrlich rot ist. Sie sagt nie, dass gearbeitet wird, wenn nicht gearbeitet
+  wird.
+* **Deutsch und Englisch sitzen oben in der Leiste**, auf jeder Seite, statt
+  auf einer Zeile in den Einstellungen.
+
+## Auch in 3.2.0: das Fenster bleibt während der Prüfung stehen
+
+Die Vorprüfung lief seit 3.1.0 in einem eigenen Faden, und trotzdem stand das
+Fenster mitten darin vier Zehntelsekunden still. Ein Faden allein genügt nicht:
+wer nur rechnet, behält den Interpreter für sich.
+
+Die Suche nach der Programmkennung lief als ein einziger Schritt über das ganze
+8 MB Abbild. Findet sie nichts, läuft sie bis zum Ende durch, ohne dass
+irgendetwas dazwischen kann. Sie läuft jetzt Stück für Stück, mit Überlappung,
+damit eine Kennung an einer Schnittstelle nicht verloren geht, und sie findet
+nachweislich genau dasselbe. Dazu wird der Interpreter öfter weitergereicht.
+
+Gemessen an einem echten 8 MB Paar:
+
+| | vorher | jetzt |
+| --- | --- | --- |
+| schlimmster Moment während der Prüfung | 408 ms | 18 ms |
+| die Prüfung selbst | 736 ms | 775 ms |
+
+Der Test hat das bisher nicht gesehen, weil er nur die ersten vier Zehntel nach
+dem Auswählen hingeschaut hat und das Stillstehen eine Sekunde später kam. Er
+schaut jetzt so lange hin, wie die Prüfung läuft.
 
 ## Korrektur in 3.1.1
 

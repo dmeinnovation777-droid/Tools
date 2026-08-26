@@ -137,13 +137,7 @@ def _coverage(distance):
 
 def panel(width: int, height: int, radius: float, fill, bg,
           border=None, border_width: float = 1.0, shadow=None):
-    """A rounded rectangle, worked out against `bg`, as a Tk picture.
-
-    `shadow` is (dy, blur, colour, opacity) or None. It is drawn under the
-    shape, shifted down by `dy`, with an edge that fades over `blur` pixels.
-    The shape itself keeps its size; the picture simply grows enough at the
-    bottom to have room for the shadow.
-    """
+    """A rounded rectangle, worked out against `bg`, as a Tk picture."""
     width = max(1, int(round(width)))
     height = max(1, int(round(height)))
     key = ("panel", width, height, round(float(radius), 2), fill, bg, border,
@@ -151,6 +145,30 @@ def panel(width: int, height: int, radius: float, fill, bg,
     kept = _CACHE.get(key)
     if kept is not None:
         return kept
+    rows = panel_rows(width, height, radius, fill, bg, border, border_width,
+                      shadow)
+    picture = _image(width, len(rows), rows)
+    _CACHE[key] = picture
+    return picture
+
+
+def panel_rows(width: int, height: int, radius: float, fill, bg,
+               border=None, border_width: float = 1.0, shadow=None):
+    """The pixels of a rounded rectangle, worked out against `bg`.
+
+    `shadow` is (dy, blur, colour, opacity) or None. It is drawn under the
+    shape, shifted down by `dy`, with an edge that fades over `blur` pixels.
+    The shape itself keeps its size; the picture simply grows enough at the
+    bottom to have room for the shadow.
+
+    This is the fast way round, and it leans on two things being true: a line
+    is the same on the left as on the right, and away from the corners one
+    line is the same as the next. `_panel_rows` below works the same shape out
+    the plain way, one pixel at a time, and the two are held against each
+    other by the tests.
+    """
+    width = max(1, int(round(width)))
+    height = max(1, int(round(height)))
 
     fill_rgb = rgb(fill)
     bg_rgb = rgb(bg)
@@ -209,16 +227,23 @@ def panel(width: int, height: int, radius: float, fill, bg,
     edge_span = min(half_row, band)
 
     def row_bytes(y):
+        """One line: a worked out edge, a run of one colour, the edge mirrored.
+
+        Only the edge is worked out and only the edge is put together pixel by
+        pixel. The middle of a line is a single colour repeated, which Python
+        does in one step, and on a field eight hundred pixels wide that is the
+        difference between four hundred steps a line and thirteen.
+        """
         py = y - half_h + 0.5
-        half = [pixel(x - half_w + 0.5, py) for x in range(edge_span)]
-        flat = half[-1] if half else bg_rgb
-        half += [flat] * (half_row - edge_span)
-        row = bytearray()
-        for colour in half:
-            row += bytes(colour)
-        for x in range(half_row, width):
-            row += bytes(half[width - 1 - x])
-        return bytes(row)
+        edge = [bytes(pixel(x - half_w + 0.5, py)) for x in range(edge_span)]
+        flat = edge[-1] if edge else bytes(bg_rgb)
+        left = b"".join(edge) + flat * (half_row - edge_span)
+
+        mirrored = width - half_row
+        seen = min(edge_span, mirrored)
+        right = (flat * (mirrored - seen)
+                 + b"".join(edge[index] for index in range(seen - 1, -1, -1)))
+        return left + right
 
     rows = []
     if 2 * band >= picture_h:
@@ -230,10 +255,7 @@ def panel(width: int, height: int, radius: float, fill, bg,
         rows.extend([middle] * (picture_h - 2 * band))
         for y in range(picture_h - band, picture_h):
             rows.append(row_bytes(y))
-
-    picture = _image(width, picture_h, rows)
-    _CACHE[key] = picture
-    return picture
+    return rows
 
 
 # ─────────────────────────────────────────────────────────────────────────────
