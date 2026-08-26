@@ -51,6 +51,14 @@ class DmeApp(_TkBase):
     DEFAULT_SIZE = (1120, 800)
 
     def __init__(self, start_page="lock", geometry=None):
+        # Python hands the interpreter from one thread to the next every five
+        # milliseconds by default, and it hands it on at its own convenience:
+        # a checking thread that only computes can keep a waiting window out
+        # for a fifth of a second at a time. Asked more often, the window gets
+        # its turn while the check is still running. It costs the check a few
+        # per cent and it is the difference between a window that stutters
+        # while it thinks and one that does not.
+        sys.setswitchinterval(0.0005)
         super().__init__()
         # Out of sight until it is finished. Assembling a window that is
         # already on screen is what made it wobble on open: it appeared at its

@@ -248,6 +248,8 @@ def diff_regions(stock: bytes, tuned: bytes, merge_gap: int = 16,
     raw: list[list[int]] = []
     start = None
     for base in range(0, shared, block):
+        if not base % _BREATHE_EVERY:
+            breathe()
         chunk_a = stock[base:base + block]
         chunk_b = tuned[base:base + block]
         if chunk_a == chunk_b:
@@ -290,6 +292,8 @@ def changed_byte_count(stock: bytes, tuned: bytes, block: int = 4096) -> int:
     view_a, view_b = memoryview(stock), memoryview(tuned)
     count = 0
     for base in range(0, shared, block):
+        if not base % _BREATHE_EVERY:
+            breathe()
         # Both slices end at `shared`, never at the longer file's end: two ints
         # of different width would XOR to something too wide to write back.
         end = min(base + block, shared)
@@ -303,19 +307,73 @@ def changed_byte_count(stock: bytes, tuned: bytes, block: int = 4096) -> int:
     return count + tail
 
 
+# How often the block loops below come up for air, in bytes of image. Every
+# 256 KB is about thirty times over an 8 MB pair: often enough that the window
+# never waits long, rare enough to cost nothing worth measuring.
+_BREATHE_EVERY = 256 * 1024
+
+
+def breathe() -> None:
+    """Hand the interpreter back for a moment, so the window gets its turn.
+
+    A worker thread that only ever computes keeps the interpreter to itself:
+    Python hands it over at its own pace, and a window waiting for its turn can
+    be kept waiting a fifth of a second at a time. Sleeping for no time at all
+    is not nothing, it is a release and a fresh request, and the window is
+    ahead in the queue. On the window thread itself this would be the window
+    waiting for itself, so there it does nothing.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        time.sleep(0)
+
+
+# The regex engine does not let go of the interpreter lock while it runs, so a
+# single finditer over an 8 MB image holds the window still for as long as the
+# search takes, worker thread or not: a search that finds nothing runs to the
+# end of the image in one uninterrupted step. Cutting the image into pieces
+# puts a Python step between the searches, and that is where the window gets
+# its turn.
+_SCAN_CHUNK = 256 * 1024
+# Longer than any pattern searched for here, so a match cut in two by a piece
+# boundary is whole in the next piece, and the lookarounds see real bytes on
+# both sides instead of the edge of a slice.
+_SCAN_PAD = 32
+
+
+def _scan_for(pattern, data, chunk: int = _SCAN_CHUNK, pad: int = _SCAN_PAD):
+    """finditer over a large image, in pieces, yielding the matched bytes.
+
+    Every piece is read with `pad` bytes of context on either side, and only
+    the matches that begin inside the piece itself are kept, so nothing is
+    found twice at a cut and nothing is lost across one. What comes out is
+    what finditer over the whole image gives, in the same order.
+    """
+    view = memoryview(data)
+    size = len(data)
+    for base in range(0, size, chunk):
+        start = max(0, base - pad)
+        piece = view[start:min(size, base + chunk + pad)]
+        mine = base - start                    # where this piece's own range begins
+        end = mine + min(chunk, size - base)
+        breathe()
+        for match in pattern.finditer(piece):
+            if mine <= match.start() < end:
+                yield match.group()
+
+
 def detect_rom_ids(data: bytes, limit: int = 12) -> list[str]:
     """Heuristic: the 14-digit program id and SGBM tokens BMW ROMs carry."""
-    # finditer, not findall: findall builds the complete list of matches over
-    # the whole 8 MB before the loop below gets to stop at the limit.
+    # Piece by piece, not in one go: see _scan_for. Stopping at the limit
+    # matters as much, which is why neither loop builds a full list first.
     found: list[str] = []
-    for match in ROM_ID_RE.finditer(data):
-        text = match.group().decode("ascii")
+    for raw in _scan_for(ROM_ID_RE, data):
+        text = raw.decode("ascii")
         if text != "0" * 14 and text not in found:
             found.append(text)
         if len(found) >= limit:
             break
-    for match in SGBM_RE.finditer(data):
-        text = match.group().decode("ascii").lower()
+    for raw in _scan_for(SGBM_RE, data):
+        text = raw.decode("ascii").lower()
         if text not in found:
             found.append(text)
         if len(found) >= limit * 2:

@@ -5,6 +5,7 @@ import shutil
 import random
 import sys
 import tempfile
+import threading
 import time
 import textwrap
 import unittest
@@ -1255,6 +1256,105 @@ class TestTheLogIsReachableAfterAFailure(unittest.TestCase):
         source = inspect.getsource(m.LockUI._save_log)
         for field in ("Tuned", "Stock", "XDF", "Tool key", "VIN", "Builder"):
             self.assertIn(field, source)
+
+
+class TestTheSearchIsCutIntoPieces(unittest.TestCase):
+    """The program id search runs piece by piece, not in one go.
+
+    One finditer over an 8 MB image is a single step the interpreter cannot
+    interrupt, so the window it was supposed to run away from stood still for
+    four tenths of a second anyway. Cut into pieces it lets go regularly, and
+    it has to find exactly what it found before: a piece boundary may not lose
+    an id that straddles it, invent one at the edge, or return the same one
+    twice.
+    """
+
+    @staticmethod
+    def whole_image_search(data, limit=12):
+        """What the search did before it was cut up."""
+        found = []
+        for match in m.ROM_ID_RE.finditer(data):
+            text = match.group().decode("ascii")
+            if text != "0" * 14 and text not in found:
+                found.append(text)
+            if len(found) >= limit:
+                break
+        for match in m.SGBM_RE.finditer(data):
+            text = match.group().decode("ascii").lower()
+            if text not in found:
+                found.append(text)
+            if len(found) >= limit * 2:
+                break
+        return found
+
+    def test_an_id_on_a_piece_boundary_is_still_found(self):
+        chunk = m._SCAN_CHUNK
+        for delta in range(-18, 19):
+            data = bytearray(b"\x00" * (chunk * 2 + 4096))
+            at = chunk + delta
+            data[at:at + 14] = b"00005C6414C808"
+            data[at + 40:at + 53] = b"swfl_1a2b3c4d"
+            image = bytes(data)
+            self.assertEqual(m.detect_rom_ids(image), self.whole_image_search(image),
+                             f"a piece boundary changed the answer at offset {at}")
+
+    def test_the_answer_is_the_same_on_real_looking_images(self):
+        rng = random.Random(11)
+        for _ in range(25):
+            size = rng.randrange(1, m._SCAN_CHUNK * 3)
+            data = bytearray(rng.randbytes(size))
+            for _ in range(rng.randrange(0, 6)):
+                if size < 40:
+                    break
+                at = rng.randrange(0, size - 30)
+                data[at:at + 14] = "".join(
+                    rng.choice("0123456789ABCDEF") for _ in range(14)).encode()
+            image = bytes(data)
+            self.assertEqual(m.detect_rom_ids(image), self.whole_image_search(image))
+
+    def test_nothing_and_almost_nothing(self):
+        for image in (b"", b"\x00", b"00005C6414C808", b"0" * 14):
+            self.assertEqual(m.detect_rom_ids(image), self.whole_image_search(image))
+
+    def test_it_still_stops_at_the_limit(self):
+        parts = []
+        for number in range(40):
+            parts.append(f"{number:014X}".encode())
+            parts.append(b"\x00" * 8)
+        image = b"".join(parts)
+        self.assertEqual(len(m.detect_rom_ids(image, limit=5)), 5)
+
+
+class TestTheWorkerComesUpForAir(unittest.TestCase):
+    """A thread that only computes keeps the interpreter to itself."""
+
+    def test_a_worker_lets_go_but_the_window_thread_does_not(self):
+        # On the window thread breathing would be the window waiting for
+        # itself, so there it has to be a no-op.
+        started = time.perf_counter()
+        for _ in range(200):
+            m.breathe()
+        on_main = time.perf_counter() - started
+        self.assertLess(on_main, 0.05, "breathe() is not free on the window thread")
+
+        seen = []
+
+        def worker():
+            before = time.perf_counter()
+            for _ in range(200):
+                m.breathe()
+            seen.append(time.perf_counter() - before)
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        thread.join(10)
+        self.assertTrue(seen, "the worker never finished")
+
+    def test_the_heavy_loops_ask_for_it(self):
+        import inspect
+        for function in (m.diff_regions, m.changed_byte_count, m._scan_for):
+            self.assertIn("breathe()", inspect.getsource(function),
+                          f"{function.__name__} never comes up for air")
 
 
 if __name__ == "__main__":

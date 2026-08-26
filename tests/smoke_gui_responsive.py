@@ -32,9 +32,16 @@ import mhd_lock_tool as m   # noqa: E402
 
 assert dme_app.TK_AVAILABLE, "tkinter missing"
 
-# Typing may never block the window for longer than this. The old code took
-# about a second per keystroke; anything in this range is a different animal.
+# The window may never be held for longer than this. The old code took about a
+# second per keystroke; anything in this range is a different animal.
+#
+# On a shared build machine the whole picture slows down, an idle window
+# included, and a budget in plain milliseconds then measures the machine
+# instead of the app. So the allowance is the larger of this number and a
+# multiple of what the same window costs on the same machine with nothing
+# running at all: a busy build box gets room, a real freeze is caught anywhere.
 BUDGET_MS = 60
+IDLE_MULTIPLE = 4
 SIZE = 8 * 1024 * 1024
 ROM_ID = "00005C6414C808"
 
@@ -125,6 +132,27 @@ def pump(seconds):
     return worst
 
 
+def pump_while_busy(timeout=60):
+    """The same, but for exactly as long as the check runs.
+
+    Watching a fixed half second after the pick is not the same thing and it
+    let a real freeze through: 3.1.1 held the window for four tenths of a
+    second about one second after the file was picked, in the middle of the
+    check, long after a 0.4 s window had stopped looking.
+    """
+    worst = 0.0
+    deadline = time.time() + timeout
+    started_at = time.time()
+    while time.time() < deadline:
+        started = time.perf_counter()
+        app.update()
+        worst = max(worst, (time.perf_counter() - started) * 1000)
+        if not lock.is_busy():
+            return worst, (time.time() - started_at) * 1000
+        time.sleep(0.005)
+    raise AssertionError("the check never finished")
+
+
 # ── how long the expensive half actually takes, for the record ──────────────
 started = time.perf_counter()
 job = m.LockJob(vin="", stock_bin=STOCK, tuned_bin=TUNED_A,
@@ -136,15 +164,24 @@ m.forget_files()
 scans.clear()
 
 # ── picking a file: the window may not stop ─────────────────────────────────
+# What this window costs when nothing at all is going on. Everything below is
+# judged against it, so a slow machine is not mistaken for a slow app.
+resting = pump(1.2)
+allowance = max(BUDGET_MS, resting * IDLE_MULTIPLE)
+note(f"with nothing running the worst moment is {resting:.1f} ms, "
+     f"so the allowance here is {allowance:.0f} ms")
+
 started = time.perf_counter()
 lock.var_tuned.set(TUNED_A)
 app.update()
 picked = (time.perf_counter() - started) * 1000
-worst = max(picked, pump(0.4))
-assert wait_idle(), "the scan never finished"
-note(f"picking a file blocked the window for {worst:.1f} ms")
-if worst > BUDGET_MS:
-    failures.append(f"picking a file blocked for {worst:.0f} ms")
+during, ran_for = pump_while_busy()
+worst = max(picked, during)
+note(f"picking a file: the pick itself took {picked:.1f} ms, and over the "
+     f"{ran_for:.0f} ms the check ran the worst moment was {during:.1f} ms")
+if worst > allowance:
+    failures.append(f"picking a file blocked for {worst:.0f} ms, "
+                    f"allowance {allowance:.0f} ms")
 if not scans:
     failures.append("no scan ran at all")
 elif any(main for main, _ in scans):
@@ -166,8 +203,9 @@ assert wait_idle(), "something is still running after typing"
 note(f"typing 17 characters: worst keystroke {typed:.1f} ms, "
      f"worst moment in the second after {idle:.1f} ms")
 worst = max(typed, idle)
-if worst > BUDGET_MS:
-    failures.append(f"typing blocked the window for {worst:.0f} ms")
+if worst > allowance:
+    failures.append(f"typing blocked the window for {worst:.0f} ms, "
+                    f"allowance {allowance:.0f} ms")
 if len(scans) != before:
     failures.append(f"typing a VIN started {len(scans) - before} scan(s)")
 else:
