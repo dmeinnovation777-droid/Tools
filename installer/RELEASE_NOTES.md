@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-2.3.0.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-2.3.1.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -18,6 +18,29 @@ Dazu Startmenü-Einträge, auf Wunsch eine Desktop-Verknüpfung und ein Uninstal
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Korrektur in 2.3.1
+
+**In 2.2.0 und 2.3.0 ging der Starter auf, aber kein Werkzeug startete.** Ein
+Klick auf AutoTuner Backup Tool oder MHD Lock Tool brachte nur ein Fenster mit
+`No module named`. Bitte diese beiden Versionen nicht verwenden.
+
+Ursache: seit 2.2.0 steckt alles in einer Programmdatei, und die beiden
+Werkzeuge werden erst beim Klick geladen. Damit das Bauwerkzeug sie überhaupt
+mit einpackt, braucht es je einen ausdrücklichen Vermerk. Den hatte ich in das
+Bauskript für den eigenen Rechner geschrieben, aber nicht in das, mit dem die
+ausgelieferte Datei tatsächlich gebaut wird. Der Test daneben prüfte die
+falsche der beiden Dateien und stand auf grün.
+
+Behoben, und zwar an drei Stellen:
+
+* Der Vermerk steht jetzt in **beiden** Bauskripten, und der Test liest auch
+  beide.
+* Nach jedem Bau **startet die Auslieferung jedes Werkzeug einmal aus der
+  fertigen Datei** und bricht ab, wenn eines nicht hochkommt. Ein gesetzter
+  Schalter ist kein Beweis, ein laufendes Fenster schon.
+* Nachgestellt und gegengeprüft: derselbe Bau ohne den Vermerk bricht mit
+  genau Deiner Meldung ab, mit Vermerk laufen beide Werkzeuge an.
 
 ## Neu in 2.3.0
 

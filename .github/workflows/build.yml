@@ -55,18 +55,18 @@ jobs:
         id: version
         shell: bash
         run: echo "value=$(python -c 'import dme_brand; print(dme_brand.VERSION)')" >> "$GITHUB_OUTPUT"
-      - name: Build the launcher
+      # One executable carrying all three programs. Nothing imports the two
+      # tool modules at module level, so without --hidden-import PyInstaller
+      # leaves them out and the launcher opens but neither tool starts.
+      - name: Build the suite
         run: >
           pyinstaller --onefile --windowed --noconfirm --clean
-          --name "DME Innovation Tools" --icon assets/dme-icon.ico dme_suite.py
-      - name: Build AutoTuner Backup Tool
-        run: >
-          pyinstaller --onefile --windowed --noconfirm --clean
-          --name "AutoTuner Backup Tool" --icon assets/dme-icon.ico autotuner_tool.py
-      - name: Build MHD Lock Tool
-        run: >
-          pyinstaller --onefile --windowed --noconfirm --clean
-          --name "MHD Lock Tool" --icon assets/dme-icon.ico mhd_lock_tool.py
+          --name "DME Innovation Tools" --icon assets/dme-icon.ico
+          --hidden-import autotuner_tool --hidden-import mhd_lock_tool
+          dme_suite.py
+      - name: Prove every tool starts out of the built executable
+        shell: bash
+        run: python tools/check_frozen_tools.py "dist/DME Innovation Tools.exe"
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
       - name: Build the installer

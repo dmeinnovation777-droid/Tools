@@ -89,14 +89,39 @@ class TestBuildFilesStayInSync(unittest.TestCase):
         with open(os.path.join(ROOT, *parts), encoding="utf-8") as handle:
             return handle.read()
 
-    def test_build_script_bundles_every_tool_into_the_one_executable(self):
-        """A tool PyInstaller never sees is a tool the .exe cannot open - and
-        nothing imports them at module level, so each needs a hidden import."""
-        script = self.read("build_exe.bat")
-        self.assertIn(f'--name "{brand.SUITE}"', script)
-        self.assertIn("dme_suite.py", script)
-        for tool in suite.TOOLS:
-            self.assertIn(f'--hidden-import {tool["module"]}', script)
+    def test_every_build_bundles_every_tool(self):
+        """A tool PyInstaller never sees is a tool the .exe cannot open, and
+        nothing imports them at module level, so each needs a hidden import.
+
+        Checked in BOTH places that call pyinstaller. The first version of this
+        test only read build_exe.bat, while the release is built by the
+        workflow - so 2.2.0 and 2.3.0 shipped a launcher whose tools died on
+        ModuleNotFoundError, with a green test sitting next to it.
+        """
+        for parts in (("build_exe.bat",), (".github", "workflows", "build.yml")):
+            script = self.read(*parts)
+            where = "/".join(parts)
+            self.assertIn(f'--name "{brand.SUITE}"', script, where)
+            self.assertIn("dme_suite.py", script, where)
+            for tool in suite.TOOLS:
+                self.assertIn(f'--hidden-import {tool["module"]}', script,
+                              f"{where} does not bundle {tool['module']}")
+
+    def test_no_build_still_makes_a_separate_exe_per_tool(self):
+        """Leftovers would be shipped by neither installer nor launcher."""
+        for parts in (("build_exe.bat",), (".github", "workflows", "build.yml")):
+            script = self.read(*parts)
+            for stale in ("AutoTuner Backup Tool.exe", "MHD Lock Tool.exe",
+                          "autotuner_tool.py", "mhd_lock_tool.py"):
+                if stale.endswith(".py"):
+                    self.assertNotIn(f"{stale}\n", script, "/".join(parts))
+
+    def test_the_release_build_starts_the_tools_before_shipping(self):
+        """Reading a flag is not proof. The workflow runs the built .exe."""
+        workflow = self.read(".github", "workflows", "build.yml")
+        self.assertIn("tools/check_frozen_tools.py", workflow)
+        self.assertTrue(os.path.isfile(os.path.join(ROOT, "tools",
+                                                    "check_frozen_tools.py")))
 
     def test_installer_ships_the_one_executable_and_a_shortcut_per_tool(self):
         iss = self.read("installer", "dme-innovation-tools.iss")
