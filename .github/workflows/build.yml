@@ -66,6 +66,7 @@ jobs:
           dme_suite.py
       - name: Prove every tool starts out of the built executable
         shell: bash
+        timeout-minutes: 5
         run: python tools/check_frozen_tools.py "dist/DME Innovation Tools.exe"
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
