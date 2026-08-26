@@ -197,5 +197,32 @@ class TestBuildFilesStayInSync(unittest.TestCase):
                                  f"{name} says {number} tests, the suite has {actual}")
 
 
+class TestTheSmokeTestsStandOnTheirOwn(unittest.TestCase):
+    """A test that reads the machine's own settings is not a test.
+
+    smoke_gui_autotuner passed here for a week and failed on the build machine
+    for one reason: it used the real settings file, this machine had the app
+    set to English, and the build machine had nothing and so ran in German.
+    """
+
+    def test_every_screen_test_brings_its_own_settings(self):
+        folder = os.path.join(ROOT, "tests")
+        for name in sorted(os.listdir(folder)):
+            if not name.startswith("smoke_gui_"):
+                continue
+            with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                source = handle.read()
+            self.assertIn("XDG_CONFIG_HOME", source,
+                          f"{name} reads and writes the real settings")
+            before = source.index("XDG_CONFIG_HOME")
+            for module in ("import dme_app", "import autotuner_tool",
+                           "import mhd_lock_tool"):
+                at = source.find(module)
+                if at >= 0:
+                    self.assertLess(before, at,
+                                    f"{name} sets XDG_CONFIG_HOME after "
+                                    f"{module}, which is too late")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

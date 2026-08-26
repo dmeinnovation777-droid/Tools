@@ -255,14 +255,18 @@ class TestPreflight(unittest.TestCase):
         self.job.tuned_bin = copy
         report = m.preflight(self.job)
         self.assertFalse(report.ok)
-        self.assertTrue(any("identical" in i.text for i in report.errors))
+        wanted = dme_text.t("scan.identical")
+        self.assertTrue(any(i.text == wanted for i in report.errors),
+                        [i.text for i in report.errors])
 
     def test_size_mismatch_is_rejected(self):
         short = write(os.path.join(self.tmp.name, "short.bin"), bytes(0x800))
         self.job.tuned_bin = short
         report = m.preflight(self.job)
         self.assertFalse(report.ok)
-        self.assertTrue(any("Size mismatch" in i.text for i in report.errors))
+        wanted = dme_text.t("scan.size_mismatch", stock="", tuned="")[:18]
+        self.assertTrue(any(i.text.startswith(wanted) for i in report.errors),
+                        [i.text for i in report.errors])
 
     def test_bad_vin_is_rejected(self):
         self.job.vin = "TOOSHORT"

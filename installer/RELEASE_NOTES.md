@@ -1,6 +1,6 @@
 ## Download & Installation
 
-**`DME-Innovation-Tools-Setup-3.2.3.exe`** unten unter *Assets* herunterladen und starten.
+**`DME-Innovation-Tools-Setup-3.2.4.exe`** unten unter *Assets* herunterladen und starten.
 
 Windows zeigt bei unsignierten Setups die Meldung „Der Computer wurde durch Windows
 geschützt" — über **Weitere Informationen → Trotzdem ausführen** fortfahren.
@@ -23,6 +23,24 @@ ein Uninstaller.
 Standardmäßig wird nur für den aktuellen Benutzer installiert — ohne
 Administratorrechte; „für alle Benutzer" ist im Assistenten wählbar.
 Setup wahlweise auf Deutsch oder Englisch.
+
+## Korrektur in 3.2.4: Zahlen und Meldungen auf Deutsch
+
+Im Bildschirmfoto aus der Werkstatt stand **„9,256,960 Bytes"**. Das ist
+englische Schreibweise; auf Deutsch heißt das neun Komma zwei. Alle Größen in
+der App werden jetzt so gruppiert, wie die Sprache es tut, in der das Fenster
+steht: **9.256.960 Bytes** auf Deutsch, 9,256,960 auf Englisch.
+
+Ebenso die Meldungen aus dem Motor. Sie waren durchgehend Englisch, auch in der
+deutschen App, in beiden Bereichen:
+
+* Backup: „Size mismatch: parts total …", „Combined 4 part(s) →", „No .bin
+  files found in the archive."
+* Locken: „Size mismatch: stock is …", „Stock and tuned .bin are identical …",
+  „… changed byte(s) in … region(s) are outside this XDF …"
+
+Alle stehen jetzt in der Wortliste, in beiden Sprachen, und die Tests prüfen
+den Katalog statt eines englischen Wortlauts.
 
 ## Korrektur in 3.2.3: die Aufteilung gehört zur gewählten Datei
 

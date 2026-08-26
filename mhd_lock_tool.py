@@ -31,7 +31,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
 import dme_brand as brand
-from dme_text import t
+from dme_text import number, t
 
 try:
     import tkinter as tk
@@ -1010,17 +1010,17 @@ def scan_files(job: LockJob, definition: XdfDefinition = None) -> FileScan:
 
     if stock and tuned:
         if len(stock) != len(tuned):
-            scan.add("error", f"Size mismatch: stock is {len(stock):,} bytes, "
-                              f"tuned is {len(tuned):,} bytes.")
+            scan.add("error", t("scan.size_mismatch", stock=number(len(stock)),
+                                tuned=number(len(tuned))))
         else:
             scan.regions = diff_regions(stock, tuned)
             scan.changed_bytes = changed_byte_count(stock, tuned)
             if scan.changed_bytes == 0:
-                scan.add("error", "Stock and tuned .bin are identical, "
-                                  "the builder would report 'NO modifications found'.")
+                scan.add("error", t("scan.identical"))
             else:
-                scan.add("info", f"{scan.changed_bytes:,} byte(s) changed in "
-                                 f"{len(scan.regions)} region(s).")
+                scan.add("info", t("scan.changed",
+                                   bytes=number(scan.changed_bytes),
+                                   regions=len(scan.regions)))
 
         scan.stock_ids = rom_ids_of(job.stock_bin, stock)
         scan.tuned_ids = rom_ids_of(job.tuned_bin, tuned)
@@ -1056,11 +1056,8 @@ def scan_files(job: LockJob, definition: XdfDefinition = None) -> FileScan:
             scan.uncovered = definition.uncovered(scan.regions, scan.file_size)
             if scan.uncovered:
                 total = sum(length for _, length in scan.uncovered)
-                scan.add("info",
-                         f"{total:,} changed byte(s) in {len(scan.uncovered)} region(s) "
-                         f"are outside this XDF. The builder also carries its own table "
-                         f"definitions, so this is not necessarily a problem, but if it "
-                         f"reports 'Modification not in xdf', these are the offsets.")
+                scan.add("info", t("scan.outside_xdf", bytes=number(total),
+                                   regions=len(scan.uncovered)))
             else:
                 scan.add("info", f"All modifications are covered by the XDF "
                                  f"({len(scan.touched_tables)} table(s) touched).")
@@ -2466,7 +2463,7 @@ class LockUI:
             self.log.set_all(lines)
 
         if report.ok:
-            note = t("lock.step2.note", bytes=f"{report.changed_bytes:,}".replace(",", "."),
+            note = t("lock.step2.note", bytes=number(report.changed_bytes),
                      tables=len(report.touched_tables))
             self.step_check.set_note(note)
             self.var_summary.set(note)

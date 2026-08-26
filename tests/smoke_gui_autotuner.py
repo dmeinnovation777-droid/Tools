@@ -10,6 +10,13 @@ Writes /tmp/shot_tab1.xwd and /tmp/shot_tab2.xwd; convert them with
 """
 import os, sys, tempfile, zipfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Its own settings and its own layout memory. Without this the test writes into
+# the real ones and, worse, reads them: it passed here for a week because this
+# machine happened to have the app set to English, and failed on the build
+# machine, which had nothing and so ran in German.
+os.environ["XDG_CONFIG_HOME"] = tempfile.mkdtemp(prefix="autotuner_smoke_")
+
 from _screenshot import shoot  # noqa: E402
 
 import autotuner_tool as at
@@ -51,7 +58,9 @@ backup._run_zip_to_bin()
 app.update()
 with open(out_bin, "rb") as f:
     assert f.read() == b"\x01"*4096 + b"\x02"*4096 + b"\x03"*512 + b"\x04"*512
-assert backup._z2b_banner._visible and "Combined 4 part(s)" in backup._z2b_banner._text.cget("text")
+shown = backup._z2b_banner._text.cget("text")
+assert backup._z2b_banner._visible, "no banner after combining"
+assert shown.startswith(dme_text.t("backup.msg.combined", n=4, bytes="")[:12]), shown
 print("ZIP->BIN OK:", backup._z2b_banner._text.cget("text").splitlines()[0])
 shoot("tab1")
 

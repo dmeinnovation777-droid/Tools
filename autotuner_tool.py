@@ -19,7 +19,7 @@ import sys
 import zipfile
 
 import dme_brand as brand
-from dme_text import t
+from dme_text import number, t
 
 try:
     import tkinter as tk
@@ -294,7 +294,7 @@ def zip_to_bin(zip_path: str, output_path: str) -> tuple[bool, str, list[dict]]:
                 f.write(combined)
 
             return True, t("backup.msg.combined", n=len(bin_files),
-                           bytes=f"{os.path.getsize(output_path):,}"), parts_info
+                           bytes=number(os.path.getsize(output_path))), parts_info
 
     except zipfile.BadZipFile:
         return False, t("backup.msg.not_zip"), []
@@ -366,8 +366,8 @@ def bin_to_zip(bin_path: str, output_path: str, parts_config: list[dict],
 
         total = sum(p['size'] for p in parts_config)
         if total != len(data):
-            return False, t("backup.msg.size_mismatch", total=f"{total:,}",
-                            actual=f"{len(data):,}")
+            return False, t("backup.msg.size_mismatch", total=number(total),
+                            actual=number(len(data)))
 
         ini_content = build_contents_ini(ini_meta)
 
@@ -381,7 +381,7 @@ def bin_to_zip(bin_path: str, output_path: str, parts_config: list[dict],
             zf.writestr(HOW_TO_NAME, how_to_html or HOW_TO_USE_HTML)
 
         return True, t("backup.msg.created", n=len(parts_config),
-                       bytes=f"{os.path.getsize(output_path):,}")
+                       bytes=number(os.path.getsize(output_path)))
 
     except Exception as e:
         return False, t("backup.msg.failed", what=e)
@@ -800,7 +800,7 @@ class BackupUI:
             fg=ui.OK)
         self._z2b_step2.set_note(f"{info['count']} \u00b7 {format_bytes(info['total'])}")
         self._z2b_log.scroll_top()
-        self._z2b_summary.set(f"{info['count']} \u00b7 {info['total']:,} {t('word.bytes')}")
+        self._z2b_summary.set(f"{info['count']} \u00b7 {number(info['total'])} {t('word.bytes')}")
         self._z2b_state(True)
         if self._direction == "z2b":
             self._summary.set(self._z2b_summary.get())
@@ -835,7 +835,7 @@ class BackupUI:
             self._z2b_step4.set_state("done")
             self._z2b_step4.set_note(os.path.basename(out_path))
             self._z2b_summary.set(f"{len(parts)} \u00b7 "
-                                  f"{os.path.getsize(out_path):,} {t('word.bytes')}")
+                                  f"{number(os.path.getsize(out_path))} {t('word.bytes')}")
             self._summary.set(self._z2b_summary.get())
         else:
             self.banner.show("error", msg)
@@ -984,7 +984,7 @@ class BackupUI:
         total = sum(row.size for row in real)
         file_size = self._bin_size()
         self._b2z_total_var.set(
-            f"{t('backup.parts.sum')} {total:,} B ({format_bytes(total)})  \u00b7  "
+            f"{t('backup.parts.sum')} {number(total)} B ({format_bytes(total)})  \u00b7  "
             f"{format_bytes(file_size)}")
         ready = False
         if broken is not None:
@@ -998,11 +998,11 @@ class BackupUI:
             self._b2z_summary.set(t("backup.parts.empty"))
         elif total == file_size:
             self._b2z_match.config(text="\u2713  " + t("backup.parts.match"), fg=ui.OK)
-            self._b2z_summary.set(f"{len(real)} \u00b7 {total:,} "
+            self._b2z_summary.set(f"{len(real)} \u00b7 {number(total)} "
                                   f"{t('word.bytes')}")
             ready = True
         else:
-            delta = f"{abs(total - file_size):,}"
+            delta = number(abs(total - file_size))
             self._b2z_match.config(text="\u2715  " + t("backup.parts.mismatch",
                                                       delta=delta), fg=ui.ERR)
             self._b2z_summary.set(t("backup.parts.mismatch", delta=delta))
@@ -1049,7 +1049,7 @@ class BackupUI:
         else:
             size = os.path.getsize(path)
             self._b2z_path.hint.configure(
-                text=f"{os.path.basename(path)} \u00b7 {size:,} {t('word.bytes')} "
+                text=f"{os.path.basename(path)} \u00b7 {number(size)} {t('word.bytes')} "
                      f"({format_bytes(size)})", fg=ui.OK)
             # A split belongs to the file it was made for. Picking a different
             # file used to leave the old rows standing, so a Caddy was shown
@@ -1129,7 +1129,7 @@ class BackupUI:
         return " ".join(word for word in named if word)
 
     def _empty_hint(self, size: int):
-        self._parts_empty.config(text=t("backup.parts.unknown", size=f"{size:,}"))
+        self._parts_empty.config(text=t("backup.parts.unknown", size=number(size)))
 
     def _browse_bin(self):
         path = filedialog.askopenfilename(

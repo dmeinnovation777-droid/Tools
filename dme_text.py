@@ -45,6 +45,23 @@ def set_language(code: str) -> str:
     return _current
 
 
+def number(value) -> str:
+    """A whole number grouped the way the current language groups them.
+
+    German puts a dot where English puts a comma, so "9,256,960" reads as nine
+    and a quarter to a German eye. The file sizes in this app are exactly the
+    numbers a tuner checks against the ones the reading tool showed, so they
+    have to be grouped the way that tuner reads.
+    """
+    try:
+        grouped = f"{int(value):,}"
+    except (TypeError, ValueError):
+        return str(value)
+    if language() == "de":
+        return grouped.replace(",", ".")
+    return grouped
+
+
 def t(key: str, **values) -> str:
     """The line for ``key`` in the current language.
 
@@ -291,6 +308,30 @@ CATALOG: dict[str, dict] = {
     "backup.parts.restored": _(
         "{n} Teile aus {source} übernommen.",
         "{n} parts taken from {source}."),
+    # What the pre-flight itself says. Same reason as the backup messages
+    # below: these end up in the log and the step note, in front of somebody
+    # who set the window to German.
+    "scan.size_mismatch": _(
+        "Größen stimmen nicht: das Original hat {stock} Bytes, die getunte Datei "
+        "{tuned} Bytes.",
+        "Size mismatch: stock is {stock} bytes, tuned is {tuned} bytes."),
+    "scan.identical": _(
+        "Original und getunte .bin sind gleich. Der Builder würde "
+        "„NO modifications found\u201c melden.",
+        "Stock and tuned .bin are identical, the builder would report "
+        "\u201aNO modifications found\u2019."),
+    "scan.changed": _(
+        "{bytes} Bytes geändert, in {regions} Bereichen.",
+        "{bytes} byte(s) changed in {regions} region(s)."),
+    "scan.outside_xdf": _(
+        "{bytes} geänderte Bytes in {regions} Bereichen liegen außerhalb dieser "
+        "XDF. Der Builder bringt eigene Tabellen mit, das muss also kein Problem "
+        "sein. Meldet er „Modification not in xdf\u201c, sind das die Stellen.",
+        "{bytes} changed byte(s) in {regions} region(s) are outside this XDF. The "
+        "builder also carries its own table definitions, so this is not "
+        "necessarily a problem, but if it reports \u2018Modification not in "
+        "xdf\u2019, these are the offsets."),
+
     # What the engine itself says. It used to answer in English while the rest
     # of the window spoke German, which is how a tuner ends up reading a size
     # mismatch in a second language on a Friday evening.
