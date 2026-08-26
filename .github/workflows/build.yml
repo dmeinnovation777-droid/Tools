@@ -7,14 +7,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Several commits in a row used to leave several full builds running side by
-# side, and the Windows one counts double against the account's minutes. Only
-# the newest push of a branch is worth building: the older ones are already
-# out of date by the time they finish.
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
-
 # Needed so a tagged build can publish the installer as a release asset.
 permissions:
   contents: write
@@ -60,13 +52,6 @@ jobs:
     name: Build Windows installer
     runs-on: windows-latest
     needs: [test]
-    # The costly one: Windows minutes count double. It is skipped for a commit
-    # whose message says so, which is how a pure test or documentation change
-    # gets its answer from the two Linux jobs without paying for an installer
-    # nobody is waiting for.
-    if: >
-      !contains(github.event.head_commit.message, '[kein setup]') &&
-      !contains(github.event.head_commit.message, '[no setup]')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
